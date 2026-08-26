@@ -46,7 +46,13 @@ public:
       m_custom_symbol = source_symbol + "." + period_token;
       
       // Check if symbol already exists
-      if(SymbolExist(m_custom_symbol, true))
+      bool symbol_exists = false;
+      if(SymbolSelect(m_custom_symbol, false))
+      {
+         symbol_exists = true;
+      }
+      
+      if(symbol_exists)
       {
          if(m_verbose)
             Print("Custom symbol already exists: ", m_custom_symbol);
@@ -111,7 +117,8 @@ public:
       }
       
       // Replace history
-      if(!CustomRatesReplace(m_custom_symbol, from, to, m_history_buffer))
+      int replace_result = CustomRatesReplace(m_custom_symbol, from, to, m_history_buffer);
+      if(replace_result <= 0)
       {
          Print("ERROR: CustomRatesReplace failed. Error: ", GetLastError());
          return false;
@@ -152,7 +159,8 @@ public:
       forming_brick.ToMqlRates(update_rates[completed_count]);
       
       // Update custom symbol
-      if(!CustomRatesUpdate(m_custom_symbol, update_rates))
+      int update_result = CustomRatesUpdate(m_custom_symbol, update_rates);
+      if(update_result <= 0)
       {
          int error = GetLastError();
          if(m_verbose)
@@ -163,7 +171,8 @@ public:
          {
             datetime from = update_rates[0].time;
             datetime to = update_rates[update_count - 1].time + 60;
-            return CustomRatesReplace(m_custom_symbol, from, to, update_rates);
+            int replace_result = CustomRatesReplace(m_custom_symbol, from, to, update_rates);
+            return (replace_result > 0);
          }
          
          return false;
@@ -191,7 +200,8 @@ public:
       MqlRates update_rates[1];
       update_rates[0] = rate;
       
-      if(!CustomRatesUpdate(m_custom_symbol, update_rates))
+      int update_result = CustomRatesUpdate(m_custom_symbol, update_rates);
+      if(update_result <= 0)
       {
          if(m_verbose)
             Print("UpdateFormingOnly failed. Error: ", GetLastError());

@@ -121,7 +121,7 @@ public:
          return;
       
       // Set to M1 permanently
-      ChartSetInteger(m_chart_id, CHART_PERIOD, PERIOD_M1);
+      ChartSetSymbolPeriod(m_chart_id, m_custom_symbol, PERIOD_M1);
       
       // Chart appearance
       ChartSetInteger(m_chart_id, CHART_SHOW_GRID, true);
@@ -143,7 +143,7 @@ public:
       
       if(current_period != PERIOD_M1)
       {
-         ChartSetInteger(m_chart_id, CHART_PERIOD, PERIOD_M1);
+         ChartSetSymbolPeriod(m_chart_id, m_custom_symbol, PERIOD_M1);
          
          if(m_verbose)
             Print("Enforced M1 on chart ", m_chart_id);
