@@ -45,59 +45,42 @@ public:
       m_source_symbol = source_symbol;
       m_custom_symbol = source_symbol + "." + period_token;
       
-      // Check if symbol already exists
-      bool symbol_exists = false;
-      if(SymbolSelect(m_custom_symbol, false))
-      {
-         symbol_exists = true;
-      }
+      // Simple folder path - proven working approach from OVO reference
+      string custom_folder = "Renko";
       
-      if(symbol_exists)
-      {
-         if(m_verbose)
-            Print("Custom symbol already exists: ", m_custom_symbol);
-         
-         m_symbol_created = true;
-         return true;
-      }
-      
-      // Try multiple path variations for custom symbol creation
-      string paths[] = {
-         "Custom",                    // Root custom folder
-         "Custom\\Renko",             // Custom\Renko subfolder
-         "Forex",                     // Use existing Forex path
-         "Currencies"                 // Use existing Currencies path
-      };
-      
-      bool created = false;
-      string used_path = "";
-      
-      for(int i = 0; i < ArraySize(paths); i++)
-      {
-         ResetLastError();
-         if(CustomSymbolCreate(m_custom_symbol, paths[i], m_source_symbol))
-         {
-            created = true;
-            used_path = paths[i];
-            Print("SUCCESS: Created custom symbol ", m_custom_symbol, " in path: ", used_path);
-            break;
-         }
-         else
-         {
-            int error = GetLastError();
-            if(m_verbose)
-               Print("Attempt ", i+1, " failed with path '", paths[i], "' Error: ", error);
-         }
-      }
-      
-      if(!created)
+      ResetLastError();
+      if(!CustomSymbolCreate(m_custom_symbol, custom_folder, m_source_symbol))
       {
          int error = GetLastError();
-         Print("ERROR: Failed to create custom symbol ", m_custom_symbol, " after trying all paths. Last error: ", error);
-         Print("Please check: Tools → Options → Expert Advisors → Allow DLL imports");
-         Print("And ensure terminal has write permissions to Custom symbols folder");
-         return false;
+         
+         // Error 5304 means symbol already exists - this is OK, we'll reuse it
+         if(error != 5304)
+         {
+            Print("ERROR: CustomSymbolCreate(", m_custom_symbol, ") failed. Error=", error);
+            if(m_verbose)
+            {
+               Print("  Symbol: ", m_custom_symbol);
+               Print("  Folder: ", custom_folder);
+               Print("  Origin: ", m_source_symbol);
+               Print("  Solution: Run MT5 as Administrator OR create 'Renko' folder manually");
+            }
+            return false;
+         }
+         else if(m_verbose)
+         {
+            // Error 5304 - symbol exists, will reuse
+            Print("Custom symbol already exists (reusing): ", m_custom_symbol);
+         }
       }
+      else if(m_verbose)
+      {
+         Print("SUCCESS: Created custom symbol ", m_custom_symbol, " in folder: ", custom_folder);
+      }
+      
+      m_symbol_created = true;
+      
+      // Always ensure symbol is in Market Watch
+      SymbolSelect(m_custom_symbol, true);
       
       // Set custom symbol properties
       CustomSymbolSetInteger(m_custom_symbol, SYMBOL_DIGITS, 
@@ -112,8 +95,6 @@ public:
                             SymbolInfoDouble(m_source_symbol, SYMBOL_TRADE_TICK_VALUE));
       CustomSymbolSetDouble(m_custom_symbol, SYMBOL_TRADE_CONTRACT_SIZE, 
                             SymbolInfoDouble(m_source_symbol, SYMBOL_TRADE_CONTRACT_SIZE));
-      
-      m_symbol_created = true;
       
       return true;
    }

@@ -69,40 +69,35 @@ void OnStart()
       }
    }
    
-   // Try to create custom symbol with multiple path strategies
+   // Try to create custom symbol using proven OVO approach
    Print("");
    Print("Attempting to create custom symbol...");
    Print("");
    
-   string paths[] = {
-      "Custom",
-      "Custom\\Renko", 
-      "Forex",
-      "CFD",
-      "Indices",
-      "Futures"
-   };
-   
+   string custom_folder = "Renko";
    bool created = false;
-   string successful_path = "";
    
-   for(int i = 0; i < ArraySize(paths); i++)
+   ResetLastError();
+   Print("Creating with folder: '", custom_folder, "'...");
+   
+   if(CustomSymbolCreate(custom_symbol, custom_folder, InpSourceSymbol))
    {
-      ResetLastError();
+      created = true;
+      Print("✓✓✓ SUCCESS! Created in folder: ", custom_folder);
+   }
+   else
+   {
+      int error = GetLastError();
       
-      Print("Attempt ", (i+1), ": Trying path '", paths[i], "'...");
-      
-      if(CustomSymbolCreate(custom_symbol, paths[i], InpSourceSymbol))
+      if(error == 5304)
       {
+         // Symbol already exists - this is OK
          created = true;
-         successful_path = paths[i];
-         Print("✓✓✓ SUCCESS! Created in path: ", paths[i]);
-         break;
+         Print("✓ Symbol already exists (will reuse): ", custom_symbol);
       }
       else
       {
-         int error = GetLastError();
-         Print("  ✗ Failed with error: ", error, " (", GetErrorDescription(error), ")");
+         Print("✗ Failed with error: ", error, " (", GetErrorDescription(error), ")");
       }
    }
    
@@ -159,16 +154,16 @@ void OnStart()
    
    Print("");
    Print("========================================");
-   Print("SUCCESS! Custom symbol created!");
+   Print("SUCCESS! Custom symbol ready!");
    Print("========================================");
    Print("");
    Print("Symbol Name: ", custom_symbol);
-   Print("Created in: ", successful_path);
+   Print("Created in: ", custom_folder);
    Print("Digits: ", SymbolInfoInteger(custom_symbol, SYMBOL_DIGITS));
    Print("Point: ", SymbolInfoDouble(custom_symbol, SYMBOL_POINT));
    Print("");
    Print("NEXT STEPS:");
-   Print("1. Check Market Watch → Symbols → ", successful_path);
+   Print("1. Check Market Watch → Symbols → ", custom_folder);
    Print("2. You should see: ", custom_symbol);
    Print("3. Now attach OVO_Renko_Generator indicator");
    Print("4. Use Period Token: ", InpPeriodToken);
@@ -177,9 +172,9 @@ void OnStart()
    
    // Show success message
    MessageBox(
-      "Custom symbol created successfully!\n\n" +
+      "Custom symbol ready!\n\n" +
       "Symbol: " + custom_symbol + "\n" +
-      "Path: " + successful_path + "\n\n" +
+      "Folder: " + custom_folder + "\n\n" +
       "You can now use the OVO Renko Generator indicator.",
       "Success!",
       MB_OK | MB_ICONINFORMATION
