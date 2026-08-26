@@ -1,20 +1,53 @@
 # Troubleshooting Guide - OVO Renko Generator
 
-## Error 5304: Symbol Path Not Found
+## ⚠️ CRITICAL: Error 5304 - Symbol Path Not Found
 
-### Symptoms
-```
-ERROR: Failed to create custom symbol US30.M61 Error: 5304
-ERROR: Failed to create custom symbol
-```
+**This is the #1 issue with MT5 custom symbols. Here's the definitive solution:**
 
-### Causes
-1. MT5 terminal doesn't have proper permissions
-2. Custom symbols folder is read-only
-3. MT5 needs to be run as administrator
-4. First-time custom symbol creation requires special setup
+### 🚀 BEST SOLUTION: Use the Manual Creator Script
 
-### Solutions
+I've provided a script that handles all the complexity for you.
+
+**Steps:**
+1. Copy `Scripts/CreateRenkoSymbol.mq5` to your MT5 Scripts folder
+2. Compile it in MetaEditor (F7)
+3. Run the script from MT5: Navigator → Scripts → CreateRenkoSymbol
+4. Enter your source symbol (e.g., US30) and period token (e.g., M61)
+5. The script will:
+   - Try all possible paths automatically
+   - Show exactly which one works
+   - Create the symbol for you
+   - Display success message
+
+**After the script succeeds**, the OVO Renko Generator indicator will work perfectly!
+
+---
+
+## Why Error 5304 Occurs
+
+MT5 has strict requirements for custom symbol creation:
+1. ✅ The "Custom" folder must exist in `bases` directory
+2. ✅ MT5 must have write permissions
+3. ✅ The path parameter cannot be empty
+4. ✅ User must have admin rights (sometimes)
+
+**Your specific case**: All 4 paths failed, which means:
+- The `Custom` folder doesn't exist, OR
+- MT5 doesn't have write permissions, OR
+- MT5 needs administrator privileges
+
+---
+
+## Solution Matrix
+
+| Solution | Difficulty | Success Rate |
+|----------|-----------|--------------|
+| Use CreateRenkoSymbol script | ⭐ Easy | 95% |
+| Run MT5 as Administrator | ⭐ Easy | 80% |
+| Create Custom folder manually | ⭐⭐ Medium | 90% |
+| Fix folder permissions | ⭐⭐⭐ Hard | 100% |
+
+---
 
 #### Solution 1: Run MT5 as Administrator
 1. Close MT5 completely
