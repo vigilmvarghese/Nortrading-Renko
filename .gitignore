@@ -1,0 +1,43 @@
+# MQL5 Compiled Files
+*.ex5
+
+# MQL5 Log Files
+*.log
+
+# Diagnostic Files
+*_Diagnostic*.csv
+*_TickPath*.csv
+
+# MT5 Cache
+*.cache
+
+# MT5 Templates (user-specific)
+# *.tpl
+
+# System Files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE Files
+.vscode/
+.idea/
+*.suo
+*.user
+
+# Temporary Files
+*.tmp
+*.temp
+~*
+
+# Backup Files
+*.bak
+*.backup
+*~
+
+# Test Results
+/TestResults/
+/TestData/
+
+# Personal Configuration
+config.local.mqh
