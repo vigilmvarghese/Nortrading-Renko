@@ -61,25 +61,42 @@ public:
          return true;
       }
       
-      // Create custom path for symbol (required by MT5)
-      string symbol_path = "Custom\\OVORenko";
+      // Try multiple path variations for custom symbol creation
+      string paths[] = {
+         "Custom",                    // Root custom folder
+         "Custom\\Renko",             // Custom\Renko subfolder
+         "Forex",                     // Use existing Forex path
+         "Currencies"                 // Use existing Currencies path
+      };
       
-      // Create new custom symbol with proper path
-      if(!CustomSymbolCreate(m_custom_symbol, symbol_path, m_source_symbol))
+      bool created = false;
+      string used_path = "";
+      
+      for(int i = 0; i < ArraySize(paths); i++)
+      {
+         ResetLastError();
+         if(CustomSymbolCreate(m_custom_symbol, paths[i], m_source_symbol))
+         {
+            created = true;
+            used_path = paths[i];
+            Print("SUCCESS: Created custom symbol ", m_custom_symbol, " in path: ", used_path);
+            break;
+         }
+         else
+         {
+            int error = GetLastError();
+            if(m_verbose)
+               Print("Attempt ", i+1, " failed with path '", paths[i], "' Error: ", error);
+         }
+      }
+      
+      if(!created)
       {
          int error = GetLastError();
-         Print("ERROR: Failed to create custom symbol ", m_custom_symbol, 
-               " in path '", symbol_path, "' Error: ", error);
-         
-         // Try alternative: use source symbol's path
-         symbol_path = "Custom";
-         ResetLastError();
-         if(!CustomSymbolCreate(m_custom_symbol, symbol_path, m_source_symbol))
-         {
-            error = GetLastError();
-            Print("ERROR: Second attempt failed. Error: ", error);
-            return false;
-         }
+         Print("ERROR: Failed to create custom symbol ", m_custom_symbol, " after trying all paths. Last error: ", error);
+         Print("Please check: Tools → Options → Expert Advisors → Allow DLL imports");
+         Print("And ensure terminal has write permissions to Custom symbols folder");
+         return false;
       }
       
       // Set custom symbol properties
@@ -97,9 +114,6 @@ public:
                             SymbolInfoDouble(m_source_symbol, SYMBOL_TRADE_CONTRACT_SIZE));
       
       m_symbol_created = true;
-      
-      if(m_verbose)
-         Print("Created custom symbol: ", m_custom_symbol, " in path: ", symbol_path);
       
       return true;
    }
