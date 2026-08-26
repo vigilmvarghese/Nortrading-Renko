@@ -61,12 +61,25 @@ public:
          return true;
       }
       
-      // Create new custom symbol
-      if(!CustomSymbolCreate(m_custom_symbol, "", m_source_symbol))
+      // Create custom path for symbol (required by MT5)
+      string symbol_path = "Custom\\OVORenko";
+      
+      // Create new custom symbol with proper path
+      if(!CustomSymbolCreate(m_custom_symbol, symbol_path, m_source_symbol))
       {
+         int error = GetLastError();
          Print("ERROR: Failed to create custom symbol ", m_custom_symbol, 
-               " Error: ", GetLastError());
-         return false;
+               " in path '", symbol_path, "' Error: ", error);
+         
+         // Try alternative: use source symbol's path
+         symbol_path = "Custom";
+         ResetLastError();
+         if(!CustomSymbolCreate(m_custom_symbol, symbol_path, m_source_symbol))
+         {
+            error = GetLastError();
+            Print("ERROR: Second attempt failed. Error: ", error);
+            return false;
+         }
       }
       
       // Set custom symbol properties
@@ -86,7 +99,7 @@ public:
       m_symbol_created = true;
       
       if(m_verbose)
-         Print("Created custom symbol: ", m_custom_symbol);
+         Print("Created custom symbol: ", m_custom_symbol, " in path: ", symbol_path);
       
       return true;
    }
