@@ -317,6 +317,9 @@ void OnTimer()
          // Check all objects in this window
          int obj_total = ObjectsTotal(ChartID(), w, -1);
          
+         if(init_attempts == 1 || init_attempts % 10 == 0)
+            Print("   Window ", w, " - checking ", obj_total, " objects...");
+         
          for(int i = 0; i < obj_total; i++)
          {
             string obj_name = ObjectName(ChartID(), i, w, -1);
@@ -336,7 +339,7 @@ void OnTimer()
                   window_has_our_panel = true;
                   subwindow = w;
                   if(init_attempts == 1 || init_attempts % 10 == 0)
-                     Print("   Window ", w, ": Found our panel (", g_config.period_token, ")");
+                     Print("      ✅ Found our panel object: ", obj_name);
                   break;
                }
                else
@@ -345,7 +348,7 @@ void OnTimer()
                   window_has_other_panel = true;
                   other_panel_name = obj_name;
                   if(init_attempts == 1 || init_attempts % 10 == 0)
-                     Print("   Window ", w, ": Occupied by another instance (", obj_name, ")");
+                     Print("      ⚠️ Found other instance's object: ", obj_name);
                   break;
                }
             }
@@ -355,12 +358,16 @@ void OnTimer()
          if(window_has_our_panel)
          {
             subwindow = w;
+            if(init_attempts == 1)
+               Print("   ✅ [", g_config.period_token, "] Using existing panel in window ", w);
             break;
          }
          
          // If window is occupied by another instance, skip it
          if(window_has_other_panel)
          {
+            if(init_attempts == 1 || init_attempts % 10 == 0)
+               Print("   ⏭️ Skipping window ", w, " (occupied by another instance)");
             continue;
          }
          
@@ -377,14 +384,13 @@ void OnTimer()
                ObjectSetInteger(ChartID(), marker, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);  // Hide on all timeframes
                
                subwindow = w;
-               if(init_attempts == 1 || init_attempts % 10 == 0)
-                  Print("   Window ", w, ": Claimed for ", g_config.period_token);
+               Print("   ✅ [", g_config.period_token, "] Claimed window ", w, " with marker");
                break;
             }
             else
             {
                if(init_attempts == 1)
-                  Print("   Window ", w, ": Failed to create marker, error: ", GetLastError());
+                  Print("   ❌ Failed to create marker in window ", w, ", error: ", GetLastError());
             }
          }
       }
@@ -418,6 +424,19 @@ void OnTimer()
          Print("   Subwindow: ", subwindow);
          Print("   Prefix: ", unique_prefix);
          
+         // ⚠️ CRITICAL DEBUG: List ALL objects in this window BEFORE creating panel
+         int obj_count_before = ObjectsTotal(ChartID(), subwindow, -1);
+         Print("   Objects in window ", subwindow, " BEFORE creation: ", obj_count_before);
+         if(obj_count_before > 0)
+         {
+            Print("   ⚠️ WARNING: Window is not empty! Listing objects:");
+            for(int i = 0; i < obj_count_before; i++)
+            {
+               string obj = ObjectName(ChartID(), i, subwindow, -1);
+               Print("      [", i, "] ", obj);
+            }
+         }
+         
          g_panel = new CPanelUI(ChartID(), subwindow, unique_prefix, InpVerboseLog);
          g_panel.SetChartType(InpChartType);
          g_panel.SetBrickSize(DoubleToString(InpBrickSizePoints, 0));
@@ -431,6 +450,28 @@ void OnTimer()
          if(panel_created)
          {
             Print("✅ [", g_config.period_token, "] Panel created in window ", subwindow);
+            
+            // ⚠️ CRITICAL DEBUG: List ALL objects in this window AFTER creating panel
+            int obj_count_after = ObjectsTotal(ChartID(), subwindow, -1);
+            Print("   Objects in window ", subwindow, " AFTER creation: ", obj_count_after);
+            Print("   Objects created: ", (obj_count_after - obj_count_before));
+            
+            // List our objects
+            Print("   Our objects:");
+            string obj_names[] = {"BG", "TypeLabel", "BrickField", "PeriodButton", "Status", "CloseButton"};
+            for(int i = 0; i < ArraySize(obj_names); i++)
+            {
+               string obj_name = unique_prefix + obj_names[i];
+               int found_window = ObjectFind(ChartID(), obj_name);
+               if(found_window >= 0)
+               {
+                  Print("      ✅ ", obj_names[i], " in window ", found_window);
+               }
+               else
+               {
+                  Print("      ❌ ", obj_names[i], " NOT FOUND");
+               }
+            }
             
             // Verify panel objects are visible
             string bg_name = unique_prefix + "BG";
@@ -446,7 +487,8 @@ void OnTimer()
             else
             {
                Print("❌ [", g_config.period_token, "] ERROR: Objects in wrong window!");
-               Print("   Expected: ", subwindow, ", Found: ", bg_window);
+               Print("   Expected window: ", subwindow);
+               Print("   BG object found in window: ", bg_window);
                // Don't change state - will retry
             }
          }
