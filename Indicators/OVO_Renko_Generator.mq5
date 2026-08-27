@@ -252,6 +252,14 @@ int OnCalculate(const int rates_total,
 //+------------------------------------------------------------------+
 void OnTimer()
 {
+   // ✅ CRITICAL: Enforce fixed 24px subwindow height (OVO reference pattern)
+   // MT5 allows users to drag the subwindow border, so we continuously restore
+   // the compact panel height every timer tick
+   if(g_our_subwindow > 0)
+   {
+      ChartSetInteger(ChartID(), CHART_HEIGHT_IN_PIXELS, g_our_subwindow, 24);
+   }
+   
    // ✅ FIRST: Check if we need to create the panel (deferred from OnInit)
    if(g_state == STATE_INITIALIZING && g_panel == NULL)
    {
