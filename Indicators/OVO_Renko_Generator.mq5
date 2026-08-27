@@ -8,9 +8,12 @@
 #property version   "3.00"
 #property description "MT5 OVO-Style Renko Generator - Exact OVO Implementation"
 #property description "Synchronous history build, instant completion"
-#property indicator_chart_window
-#property indicator_buffers 0
+#property indicator_separate_window
+#property indicator_height 30
+#property indicator_minimum 0
+#property indicator_maximum 1
 #property indicator_plots   0
+#property indicator_buffers 0
 
 //--- Include all components
 #include "../Include/Renko/RenkoTypes.mqh"
@@ -112,8 +115,23 @@ int OnInit()
    
    CreateComponents();
    
+   // ✅ Create panel in SEPARATE SUBWINDOW (indicator window)
+   // Find subwindow number dynamically
+   string short_name = StringFormat("OVO Renko [%s] %s", 
+                                     InpPeriodToken,
+                                     (InpChartType == RENKO_MEAN ? "Mean" : "Regular"));
+   IndicatorSetString(INDICATOR_SHORTNAME, short_name);
+   
+   // Panel will be in subwindow (not chart window)
+   int subwindow = ChartWindowFind(ChartID(), short_name);
+   if(subwindow < 0) subwindow = 0;  // Safety fallback
+   
    g_state = STATE_PANEL_ONLY;
-   g_panel = new CPanelUI(ChartID(), 0, "OVORenko_", InpVerboseLog);
+   
+   // ✅ Unique prefix for multiple instances support
+   string unique_prefix = StringFormat("OVORenko_%I64d_%s_", ChartID(), InpPeriodToken);
+   
+   g_panel = new CPanelUI(ChartID(), subwindow, unique_prefix, InpVerboseLog);
    g_panel.SetChartType(InpChartType);
    g_panel.SetBrickSize(DoubleToString(InpBrickSizePoints, 0));
    g_panel.SetPeriodText(InpPeriodToken);
@@ -124,8 +142,10 @@ int OnInit()
    EventSetMillisecondTimer(timer_ms);
    g_live_pump_timer = timer_ms;
    
-   Print("Indicator initialized successfully");
-   Print("Click period button (", InpPeriodToken, ") to generate Renko chart");
+   Print("✅ Indicator initialized in SEPARATE WINDOW");
+   Print("   Period: ", InpPeriodToken);
+   Print("   Type: ", (InpChartType == RENKO_MEAN ? "Mean Renko" : "Regular Renko"));
+   Print("   Click period button to generate chart");
    
    if(InpAutoResume && g_persistence.is_active)
    {

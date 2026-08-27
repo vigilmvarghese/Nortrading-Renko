@@ -115,7 +115,7 @@ public:
       return true;
    }
    
-   //--- Create background
+   //--- Create background (BLACK as requested)
    void CreateBackground()
    {
       string name = m_prefix + "BG";
@@ -125,14 +125,14 @@ public:
       ObjectSetInteger(m_chart_id, name, OBJPROP_YDISTANCE, 0);
       ObjectSetInteger(m_chart_id, name, OBJPROP_XSIZE, m_panel_width);
       ObjectSetInteger(m_chart_id, name, OBJPROP_YSIZE, m_panel_height);
-      ObjectSetInteger(m_chart_id, name, OBJPROP_BGCOLOR, clrWhiteSmoke);
+      ObjectSetInteger(m_chart_id, name, OBJPROP_BGCOLOR, clrBlack);  // ✅ BLACK background
       ObjectSetInteger(m_chart_id, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
       ObjectSetInteger(m_chart_id, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
       ObjectSetInteger(m_chart_id, name, OBJPROP_SELECTABLE, false);
       ObjectSetInteger(m_chart_id, name, OBJPROP_BACK, true);
    }
    
-   //--- Create chart type label
+   //--- Create chart type label (WHITE text on black background)
    void CreateChartTypeLabel()
    {
       string name = m_prefix + "TypeLabel";
@@ -146,11 +146,11 @@ public:
       ObjectSetString(m_chart_id, name, OBJPROP_TEXT, text);
       ObjectSetString(m_chart_id, name, OBJPROP_FONT, "Arial");
       ObjectSetInteger(m_chart_id, name, OBJPROP_FONTSIZE, 9);
-      ObjectSetInteger(m_chart_id, name, OBJPROP_COLOR, clrBlack);
+      ObjectSetInteger(m_chart_id, name, OBJPROP_COLOR, clrWhite);  // ✅ WHITE text
       ObjectSetInteger(m_chart_id, name, OBJPROP_SELECTABLE, false);
    }
    
-   //--- Create brick size field
+   //--- Create brick size field (WHITE input field)
    void CreateBrickField()
    {
       string name = m_prefix + "BrickField";
@@ -165,9 +165,9 @@ public:
       ObjectSetString(m_chart_id, name, OBJPROP_TEXT, m_brick_size_text);
       ObjectSetString(m_chart_id, name, OBJPROP_FONT, "Arial");
       ObjectSetInteger(m_chart_id, name, OBJPROP_FONTSIZE, 9);
-      ObjectSetInteger(m_chart_id, name, OBJPROP_COLOR, clrBlack);
-      ObjectSetInteger(m_chart_id, name, OBJPROP_BGCOLOR, clrWhite);
-      ObjectSetInteger(m_chart_id, name, OBJPROP_BORDER_COLOR, clrDarkGray);
+      ObjectSetInteger(m_chart_id, name, OBJPROP_COLOR, clrBlack);     // Black text in field
+      ObjectSetInteger(m_chart_id, name, OBJPROP_BGCOLOR, clrWhite);   // ✅ WHITE background (only input)
+      ObjectSetInteger(m_chart_id, name, OBJPROP_BORDER_COLOR, clrGray);
       ObjectSetInteger(m_chart_id, name, OBJPROP_ALIGN, ALIGN_CENTER);
       ObjectSetInteger(m_chart_id, name, OBJPROP_READONLY, false);
       ObjectSetInteger(m_chart_id, name, OBJPROP_SELECTABLE, false);
@@ -194,7 +194,7 @@ public:
       ObjectSetInteger(m_chart_id, name, OBJPROP_STATE, false);
    }
    
-   //--- Create status label
+   //--- Create status label (WHITE text on black background)
    void CreateStatusLabel()
    {
       string name = m_prefix + "Status";
@@ -207,7 +207,7 @@ public:
       ObjectSetString(m_chart_id, name, OBJPROP_TEXT, m_status_text);
       ObjectSetString(m_chart_id, name, OBJPROP_FONT, "Arial");
       ObjectSetInteger(m_chart_id, name, OBJPROP_FONTSIZE, 9);
-      ObjectSetInteger(m_chart_id, name, OBJPROP_COLOR, clrDarkGray);
+      ObjectSetInteger(m_chart_id, name, OBJPROP_COLOR, clrLimeGreen);  // ✅ Lime green status text
       ObjectSetInteger(m_chart_id, name, OBJPROP_SELECTABLE, false);
    }
    
