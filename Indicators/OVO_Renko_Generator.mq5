@@ -217,6 +217,14 @@ void OnDeinit(const int reason)
       Print("✅ Released period token ", g_config.period_token, " (deleted marker)");
    }
    
+   // ✅ Delete registry object
+   string registry_object = StringFormat("RENKO_SLOT_%I64d_%s_%s", ChartID(), _Symbol, g_config.period_token);
+   if(ObjectFind(0, registry_object) >= 0)
+   {
+      ObjectDelete(0, registry_object);
+      Print("✅ Deleted registry object for ", g_config.period_token);
+   }
+   
    // ✅ Force delete any remaining objects with our prefix
    string prefix = StringFormat("OVORenko_%I64d_%s_", ChartID(), g_config.period_token);
    ObjectsDeleteAll(ChartID(), prefix, g_our_subwindow, -1);  // -1 = all object types
@@ -523,34 +531,56 @@ string FindNextAvailablePeriodToken(string source_symbol)
    if(base_period == "") base_period = "M";  // Default to M if no prefix found
    
    // ✅ NEW APPROACH: Check for active indicator instances on THIS CHART
-   // by looking for marker objects (more reliable than checking custom symbols)
+   // by looking for:
+   // 1. Marker objects (instances that have found their window)
+   // 2. Panel objects (instances that have created panels)
+   // 3. Registry objects (instances that have registered themselves)
    
    for(int num = 61; num <= 99; num++)
    {
       string test_period = base_period + IntegerToString(num);
-      
-      // Check if any instance on this chart is using this period token
-      // by looking for marker objects
       bool token_in_use = false;
       
-      // Search all windows for markers with this period token
-      int total_windows = (int)ChartGetInteger(ChartID(), CHART_WINDOWS_TOTAL);
-      for(int w = 0; w < total_windows; w++)
+      // Check for markers
+      string mean_marker = StringFormat("OVO_Renko_%s_Mean_marker", test_period);
+      string regular_marker = StringFormat("OVO_Renko_%s_Regular_marker", test_period);
+      
+      if(ObjectFind(ChartID(), mean_marker) >= 0)
       {
-         // Check for Mean Renko marker
-         string mean_marker = StringFormat("OVO_Renko_%s_Mean_marker", test_period);
-         if(ObjectFind(ChartID(), mean_marker) >= 0)
+         Print("⚠️ Period token ", test_period, " in use (found mean marker)");
+         token_in_use = true;
+      }
+      else if(ObjectFind(ChartID(), regular_marker) >= 0)
+      {
+         Print("⚠️ Period token ", test_period, " in use (found regular marker)");
+         token_in_use = true;
+      }
+      
+      // Also check for registry objects from RegisterPeriodToken()
+      if(!token_in_use)
+      {
+         string reg_pattern = StringFormat("RENKO_SLOT_%I64d_%s_%s", ChartID(), source_symbol, test_period);
+         if(ObjectFind(0, reg_pattern) >= 0)
          {
+            Print("⚠️ Period token ", test_period, " in use (found registry object)");
             token_in_use = true;
-            break;
          }
-         
-         // Check for Regular Renko marker
-         string regular_marker = StringFormat("OVO_Renko_%s_Regular_marker", test_period);
-         if(ObjectFind(ChartID(), regular_marker) >= 0)
+      }
+      
+      // Also check for panel background objects (most reliable)
+      if(!token_in_use)
+      {
+         // Search all windows for panel objects with this period token
+         int total_windows = (int)ChartGetInteger(ChartID(), CHART_WINDOWS_TOTAL);
+         for(int w = 0; w < total_windows; w++)
          {
-            token_in_use = true;
-            break;
+            string panel_bg = StringFormat("OVORenko_%I64d_%s_BG", ChartID(), test_period);
+            if(ObjectFind(ChartID(), panel_bg) >= 0)
+            {
+               Print("⚠️ Period token ", test_period, " in use (found panel object)");
+               token_in_use = true;
+               break;
+            }
          }
       }
       
@@ -558,10 +588,6 @@ string FindNextAvailablePeriodToken(string source_symbol)
       {
          Print("✅ Auto-assigned period token: ", test_period, " (available slot on chart)");
          return test_period;
-      }
-      else
-      {
-         Print("⚠️ Period token ", test_period, " in use by active instance");
       }
    }
    
@@ -582,6 +608,20 @@ void InitializeConfig()
    // ✅ AUTO-INCREMENT PERIOD TOKEN: Find next available for this symbol
    string auto_period = FindNextAvailablePeriodToken(_Symbol);
    g_config.period_token = auto_period;  // Use auto-assigned token instead of input
+   
+   // ✅ IMMEDIATELY register this token to prevent other instances from taking it
+   string registry_object = StringFormat("RENKO_SLOT_%I64d_%s_%s", ChartID(), _Symbol, auto_period);
+   if(!ObjectCreate(0, registry_object, OBJ_LABEL, 0, 0, 0))
+   {
+      Print("⚠️ Warning: Could not create registry object for ", auto_period);
+   }
+   else
+   {
+      ObjectSetInteger(0, registry_object, OBJPROP_HIDDEN, true);
+      ObjectSetInteger(0, registry_object, OBJPROP_SELECTABLE, false);
+      ObjectSetString(0, registry_object, OBJPROP_TEXT, auto_period);
+      Print("✅ Registered period token: ", auto_period, " (registry object created)");
+   }
    
    g_config.history_days = InpHistoryDays;
    g_config.live_pump_ms = InpLivePumpMs;
