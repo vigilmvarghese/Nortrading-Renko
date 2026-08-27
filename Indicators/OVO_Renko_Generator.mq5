@@ -10,8 +10,6 @@
 #property description "Synchronous history build, instant completion"
 #property indicator_separate_window
 #property indicator_height 30
-#property indicator_fixed_minimum 0
-#property indicator_fixed_maximum 1
 #property indicator_minimum 0
 #property indicator_maximum 1
 #property indicator_levelcolor clrNONE
@@ -217,7 +215,7 @@ void OnDeinit(const int reason)
    
    // ✅ Force delete any remaining objects with our prefix
    string prefix = StringFormat("OVORenko_%I64d_%s_", ChartID(), g_config.period_token);
-   ObjectsDeleteAll(ChartID(), prefix, g_our_subwindow, OBJ_ALL);
+   ObjectsDeleteAll(ChartID(), prefix, g_our_subwindow, -1);  // -1 = all object types
    
    DestroyComponents();
    
