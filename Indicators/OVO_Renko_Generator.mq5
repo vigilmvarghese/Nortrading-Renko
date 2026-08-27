@@ -48,8 +48,7 @@ input bool InpEnableTickCache = true;                      // Enable Tick Cache
 input int InpTickChunkMinutes = 180;                       // Tick load chunk size (minutes)
 
 input group "=== PERSISTENCE ==="
-// ❌ Auto-resume disabled - user must explicitly click button to generate chart
-// input bool InpAutoResume = true;                           // Auto Resume After MT5 Restart
+input bool InpAutoResume = true;                           // Auto Resume After MT5 Restart
 input bool InpPreserveChartSetup = true;                   // Preserve Generated Chart Setup
 
 input group "=== TRADE DISPLAY ==="
@@ -108,14 +107,18 @@ int OnInit()
    g_persistence.chart_type = InpChartType;
    g_persistence.brick_size = InpBrickSizePoints;
    
-   // ❌ Auto-resume disabled
-   /*
+   // ✅ Load persistence state (but don't auto-resume yet)
+   bool has_saved_state = false;
    if(InpAutoResume)
    {
       if(g_persistence.Load())
-         Print("Loaded persistence state - will auto-resume");
+      {
+         has_saved_state = true;
+         Print("Loaded persistence state from previous session");
+         Print("   is_active: ", g_persistence.is_active);
+         Print("   chart_id: ", g_persistence.chart_id);
+      }
    }
-   */
    
    CreateComponents();
    
@@ -151,16 +154,19 @@ int OnInit()
    Print("   Type: ", (InpChartType == RENKO_MEAN ? "Mean Renko" : "Regular Renko"));
    Print("   Click period button to generate chart");
    
-   // ✅ DISABLED auto-resume to prevent automatic generation on attach
-   // User must explicitly click the period button to generate chart
-   /*
-   if(InpAutoResume && g_persistence.is_active)
+   // ✅ CRITICAL: Only auto-resume if the session was PREVIOUSLY ACTIVE (STATE_LIVE)
+   // This means user had already generated a chart before MT5 closed
+   // On first attach (is_active = false), we wait for user to click the button
+   if(has_saved_state && g_persistence.is_active && InpAutoResume)
    {
-      Print("Auto-resuming previous session...");
-      g_explicit_button_click = false;
-      g_rebuild_requested = true;
+      Print("🔄 Auto-resuming previous session (MT5 was restarted while chart was live)...");
+      g_explicit_button_click = false;  // Not a manual click
+      g_rebuild_requested = true;       // Trigger rebuild
    }
-   */
+   else
+   {
+      Print("⏸️ First attach or inactive session - waiting for user to click button");
+   }
    
    return INIT_SUCCEEDED;
 }
@@ -173,17 +179,23 @@ void OnDeinit(const int reason)
    Print("=== OVO Renko Generator Deinitializing ===");
    Print("Reason: ", GetDeinitReasonText(reason));
    
+   // ✅ Save persistence state based on current state
+   // - If STATE_LIVE: Mark as active so auto-resume works on MT5 restart
+   // - If REASON_REMOVE: User manually removed indicator, disable auto-resume
+   // - Otherwise: Keep existing state
+   
    if(g_state == STATE_LIVE)
    {
-      g_persistence.is_active = true;
+      g_persistence.is_active = true;  // ✅ Chart was active, enable auto-resume
+      g_persistence.chart_id = g_chart_manager != NULL ? g_chart_manager.GetChartID() : 0;
       g_persistence.Save();
-      Print("Persistence state saved");
+      Print("✅ Persistence state saved (is_active = true) - will auto-resume on restart");
    }
    else if(reason == REASON_REMOVE)
    {
-      g_persistence.is_active = false;
+      g_persistence.is_active = false;  // ❌ User removed indicator, disable auto-resume
       g_persistence.Save();
-      Print("Indicator removed - auto-resume disabled");
+      Print("❌ Indicator removed - auto-resume disabled");
    }
    
    EventKillTimer();
