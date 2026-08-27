@@ -866,23 +866,28 @@ void StartRebuild()
    
    Print("✅ Published successfully - chart cleaned and regenerated");
    
-   // ⚡ Force chart to reload data after clean regeneration
+   // ⚡ CRITICAL: Force complete chart reload to clear old cached bars
    string custom_symbol = g_publisher.GetCustomSymbolName();
    
    // Find existing chart first
    long existing_chart_id = g_chart_manager.FindChart(custom_symbol);
    if(existing_chart_id > 0)
    {
-      // Chart exists - refresh it to clear old cached data
-      ChartSetSymbolPeriod(existing_chart_id, custom_symbol, PERIOD_M1);
-      ChartNavigate(existing_chart_id, CHART_END, 0);
-      ChartRedraw(existing_chart_id);
+      if(InpVerboseLog)
+         Print("Found existing chart ", existing_chart_id, " - closing it to force clean reload");
+      
+      // ⚡ CRITICAL FIX: Close the chart completely to clear cached data
+      // This ensures MT5 reloads data from custom symbol (which we just cleaned)
+      ChartClose(existing_chart_id);
+      
+      // Give MT5 time to close and clear cache
+      Sleep(300);
       
       if(InpVerboseLog)
-         Print("Refreshed existing chart to show new data");
+         Print("Old chart closed - will reopen with fresh data");
    }
    
-   // Open/switch to chart
+   // Open/switch to chart (will create new chart with clean data)
    long chart_id = g_chart_manager.OpenChart(custom_symbol, g_explicit_button_click);
    
    if(chart_id == 0)
@@ -893,6 +898,9 @@ void StartRebuild()
          g_panel.SetStatusText("ERROR: Chart failed");
       return;
    }
+   
+   if(InpVerboseLog)
+      Print("✅ New chart opened with clean data: ", chart_id);
    
    g_explicit_button_click = false;
    

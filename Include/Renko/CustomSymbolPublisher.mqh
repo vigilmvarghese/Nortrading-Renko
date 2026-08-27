@@ -115,29 +115,36 @@ public:
          return false;
       
       if(m_verbose)
-         PrintFormat("Replacing history: %d bricks", count);
+         PrintFormat("🔄 Replacing history: %d bricks", count);
       
-      // ✅ CRITICAL FIX: Explicitly delete ALL old bars before replacing
-      // This ensures clean slate when regenerating with different brick size
+      // ✅ CRITICAL FIX: Delete ALL existing bars first
       datetime delete_from = D'1970.01.01 00:00';
       datetime delete_to = D'2099.12.31 23:59';
       
+      if(m_verbose)
+         Print("   Step 1: Deleting ALL existing bars...");
+      
       ResetLastError();
-      if(!CustomRatesDelete(m_custom_symbol, delete_from, delete_to))
+      int delete_result = CustomRatesDelete(m_custom_symbol, delete_from, delete_to);
+      int delete_error = GetLastError();
+      
+      if(m_verbose)
       {
-         int err = GetLastError();
-         if(m_verbose && err != 0)
-            PrintFormat("CustomRatesDelete returned false (may be normal). Error=%d", err);
-      }
-      else if(m_verbose)
-      {
-         Print("Successfully deleted old bars");
+         if(delete_result > 0)
+            PrintFormat("   ✅ Deleted %d old bars", delete_result);
+         else if(delete_error == 0 || delete_error == 4400)
+            Print("   ✅ No old bars to delete (clean slate)");
+         else
+            PrintFormat("   ⚠️ Delete returned %d, error %d", delete_result, delete_error);
       }
       
-      // Small delay to ensure deletion is processed
-      Sleep(100);
+      // ⚡ CRITICAL: Give MT5 time to process deletion
+      Sleep(250);
       
       // Convert bricks to MqlRates
+      if(m_verbose)
+         Print("   Step 2: Converting bricks to rates...");
+      
       MqlRates rates[];
       ArrayResize(rates, count);
       
@@ -153,26 +160,40 @@ public:
          rates[i].real_volume = bricks[i].real_volume;
       }
       
-      // Get time range from actual data
+      // Get time range from actual data with buffer
       datetime first_time = rates[0].time;
-      datetime last_time = rates[count - 1].time + 86400;  // Add 1 day buffer
+      datetime last_time = rates[count - 1].time + 86400;
       
-      // ✅ ATOMIC REPLACEMENT: Now replacing into clean slate
+      if(m_verbose)
+      {
+         Print("   Step 3: Writing new bars to custom symbol...");
+         PrintFormat("   Time range: %s to %s", TimeToString(first_time), TimeToString(last_time));
+      }
+      
+      // ✅ Write new bars into clean slate
       ResetLastError();
       int written = CustomRatesReplace(m_custom_symbol,
                                        first_time,
                                        last_time,
                                        rates);
       
+      int replace_error = GetLastError();
+      
       if(written < 0)
       {
-         if(m_verbose)
-            PrintFormat("ERROR: CustomRatesReplace failed. Error=%d", GetLastError());
+         PrintFormat("❌ ERROR: CustomRatesReplace failed. Written=%d, Error=%d", written, replace_error);
          return false;
       }
       
       if(m_verbose)
-         PrintFormat("✅ History replacement complete: %d bars written (clean regeneration)", written);
+         PrintFormat("   ✅ Wrote %d new bars", written);
+      
+      // ⚡ Force symbol refresh in MT5
+      SymbolSelect(m_custom_symbol, true);
+      Sleep(100);
+      
+      if(m_verbose)
+         Print("✅ Clean regeneration complete - old bars cleared, new bars published");
       
       return true;
    }
