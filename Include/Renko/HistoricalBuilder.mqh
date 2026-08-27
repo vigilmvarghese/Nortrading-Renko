@@ -222,7 +222,7 @@ public:
       return true;
    }
    
-   //--- Process one build pass
+   //--- Process one build pass (SYNCHRONOUS - all ticks at once)
    bool ProcessBuildPass(ENUM_RENKO_TYPE type, double brick_size_points,
                          bool suppress_wicks)
    {
@@ -230,12 +230,12 @@ public:
          return false;
       
       uint start_time = GetTickCount();
-      int ticks_processed = 0;
       
-      // ✅ FIX: Use PERSISTENT engine, don't recreate each pass
-      // Engines are created in StartBuild and maintained throughout
+      if(m_verbose)
+         Print("Processing ", m_total_ticks, " ticks synchronously...");
       
-      // Process ticks within time budget
+      // ✅ SYNCHRONOUS BUILD: Process ALL ticks in one pass
+      // No time budget - complete immediately
       while(m_build_index < m_total_ticks)
       {
          MqlTick tick = m_tick_cache[m_build_index];
@@ -277,29 +277,19 @@ public:
          }
          
          m_build_index++;
-         ticks_processed++;
          m_progress.processed_ticks = m_build_index;
-         
-         // Check time budget
-         uint elapsed = GetTickCount() - start_time;
-         if(elapsed >= (uint)m_budget_ms)
-            break;
       }
       
-      // Check if finished
-      if(m_build_index >= m_total_ticks)
-      {
-         m_is_building = false;
-         m_progress.Complete();
-         
-         if(m_verbose)
-            Print("Build completed: ", m_result_count, " bricks from ", 
-                  m_total_ticks, " ticks");
-         
-         return false;  // Build finished
-      }
+      // Build finished - mark complete
+      uint elapsed_ms = GetTickCount() - start_time;
+      m_is_building = false;
+      m_progress.Complete();
       
-      return true;  // More work to do
+      if(m_verbose)
+         Print("Build completed: ", m_result_count, " bricks from ", 
+               m_total_ticks, " ticks in ", elapsed_ms, " ms");
+      
+      return false;  // Build finished (single pass)
    }
    
    //--- Get build results
