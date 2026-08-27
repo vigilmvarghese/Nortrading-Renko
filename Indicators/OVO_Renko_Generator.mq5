@@ -12,8 +12,6 @@
 #property indicator_height 30
 #property indicator_minimum 0
 #property indicator_maximum 1
-#property indicator_fixed_minimum 0
-#property indicator_fixed_maximum 1
 #property indicator_levelcolor clrNONE
 #property indicator_plots   1
 #property indicator_buffers 1
