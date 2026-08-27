@@ -140,70 +140,20 @@ int OnInit()
                                      (InpChartType == RENKO_MEAN ? "Mean" : "Regular"));
    IndicatorSetString(INDICATOR_SHORTNAME, short_name);
    
-   // ✅ IMPORTANT: For indicator_separate_window with multiple instances:
-   // ChartWindowOnDropped() returns where you DROPPED from (usually 1 for all)
-   // We need to find the ACTUAL window where THIS instance was placed
-   // MT5 creates separate windows automatically, we just need to find ours
-   
-   int subwindow = ChartWindowFind(ChartID(), short_name);
-   Print("📍 ChartWindowFind('", short_name, "') returned: ", subwindow);
-   
-   // If not found yet (rare), try ChartWindowOnDropped as fallback
-   if(subwindow < 0)
-   {
-      subwindow = ChartWindowOnDropped();
-      Print("📍 Fallback: ChartWindowOnDropped() returned: ", subwindow);
-   }
-   
-   // Final safety check
-   if(subwindow <= 0)
-   {
-      Print("⚠️ ERROR: Unable to determine indicator subwindow!");
-      Print("   This will cause panel positioning issues.");
-      Print("   Defaulting to subwindow 1 as last resort.");
-      subwindow = 1;
-   }
-   
-   Print("✅ Using subwindow: ", subwindow, " for panel objects");
-   Print("   Short name: ", short_name);
-   
-   g_state = STATE_PANEL_ONLY;
-   
-   // ✅ Unique prefix for multiple instances support (use auto-assigned period)
-   string unique_prefix = StringFormat("OVORenko_%I64d_%s_", ChartID(), g_config.period_token);
-   
-   g_panel = new CPanelUI(ChartID(), subwindow, unique_prefix, InpVerboseLog);
-   g_panel.SetChartType(InpChartType);
-   g_panel.SetBrickSize(DoubleToString(InpBrickSizePoints, 0));  // ✅ Uses actual input setting
-   g_panel.SetPeriodText(g_config.period_token);  // ✅ Show auto-assigned period
-   g_panel.SetStatusText("Ready");
-   
-   Print("🎨 Creating panel with:");
-   Print("   Chart ID: ", ChartID());
-   Print("   Subwindow: ", subwindow);
-   Print("   Prefix: ", unique_prefix);
-   Print("   Chart Type: ", (InpChartType == RENKO_MEAN ? "Mean Renko" : "Regular Renko"));
-   Print("   Period: ", g_config.period_token);
-   
-   bool panel_created = g_panel.CreatePanel();
-   
-   if(!panel_created)
-   {
-      Print("❌ ERROR: Panel creation failed!");
-   }
-   else
-   {
-      Print("✅ Panel created successfully in subwindow ", subwindow);
-   }
+   // ✅ IMPORTANT: Panel creation is deferred to OnTimer
+   // During OnInit, the indicator window may not be fully created yet
+   // We'll detect our subwindow and create the panel on first timer call
+   g_state = STATE_INITIALIZING;
    
    int timer_ms = MathMax(InpLivePumpMs, 5);
    EventSetMillisecondTimer(timer_ms);
    g_live_pump_timer = timer_ms;
    
-   Print("✅ Indicator initialized in SUBWINDOW ", subwindow);
+   Print("✅ Indicator initialized");
    Print("   Period: ", g_config.period_token, " (auto-assigned)");
    Print("   Type: ", (InpChartType == RENKO_MEAN ? "Mean Renko" : "Regular Renko"));
-   Print("   Click period button to generate chart");
+   Print("   Short name: ", short_name);
+   Print("   Panel will be created after window is ready...");
    
    // ✅ CRITICAL: Only auto-resume if the session was PREVIOUSLY ACTIVE (STATE_LIVE)
    // This means user had already generated a chart before MT5 closed
@@ -289,6 +239,53 @@ int OnCalculate(const int rates_total,
 //+------------------------------------------------------------------+
 void OnTimer()
 {
+   // ✅ FIRST: Check if we need to create the panel (deferred from OnInit)
+   if(g_state == STATE_INITIALIZING && g_panel == NULL)
+   {
+      // Now the indicator window should be fully created
+      string short_name = IndicatorShortName();
+      int subwindow = ChartWindowFind(ChartID(), short_name);
+      
+      Print("📍 [OnTimer] ChartWindowFind('", short_name, "') returned: ", subwindow);
+      
+      if(subwindow > 0)
+      {
+         // ✅ Window found! Create panel now
+         string unique_prefix = StringFormat("OVORenko_%I64d_%s_", ChartID(), g_config.period_token);
+         
+         g_panel = new CPanelUI(ChartID(), subwindow, unique_prefix, InpVerboseLog);
+         g_panel.SetChartType(InpChartType);
+         g_panel.SetBrickSize(DoubleToString(InpBrickSizePoints, 0));
+         g_panel.SetPeriodText(g_config.period_token);
+         g_panel.SetStatusText("Ready");
+         
+         Print("🎨 Creating panel with:");
+         Print("   Chart ID: ", ChartID());
+         Print("   Subwindow: ", subwindow);
+         Print("   Prefix: ", unique_prefix);
+         Print("   Chart Type: ", (InpChartType == RENKO_MEAN ? "Mean Renko" : "Regular Renko"));
+         Print("   Period: ", g_config.period_token);
+         
+         bool panel_created = g_panel.CreatePanel();
+         
+         if(panel_created)
+         {
+            Print("✅ Panel created successfully in subwindow ", subwindow);
+            g_state = STATE_PANEL_ONLY;
+         }
+         else
+         {
+            Print("❌ ERROR: Panel creation failed!");
+         }
+      }
+      else
+      {
+         Print("⏳ Waiting for indicator window to be created...");
+      }
+      
+      return;  // Don't process other states yet
+   }
+   
    // Timer only handles UI updates and non-live states when OnTick is enabled
    if(InpUseOnTick)
    {
