@@ -123,6 +123,9 @@ public:
    {
       string name = m_prefix + "BG";
       
+      if(m_verbose)
+         Print("Creating background: chart=", m_chart_id, " subwindow=", m_subwindow, " name=", name);
+      
       ObjectCreate(m_chart_id, name, OBJ_RECTANGLE_LABEL, m_subwindow, 0, 0);
       ObjectSetInteger(m_chart_id, name, OBJPROP_XDISTANCE, 0);
       ObjectSetInteger(m_chart_id, name, OBJPROP_YDISTANCE, 0);  // ✅ Top of subwindow
@@ -133,6 +136,9 @@ public:
       ObjectSetInteger(m_chart_id, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
       ObjectSetInteger(m_chart_id, name, OBJPROP_SELECTABLE, false);
       ObjectSetInteger(m_chart_id, name, OBJPROP_BACK, true);
+      
+      if(m_verbose)
+         Print("Background created: ", (ObjectFind(m_chart_id, name) >= 0 ? "SUCCESS" : "FAILED"));
    }
    
    //--- Create chart type label (WHITE text on black background)

@@ -120,16 +120,25 @@ int OnInit()
    
    CreateComponents();
    
-   // ✅ CRITICAL: Use ChartWindowOnDropped() to get the indicator's subwindow
-   // This function returns the actual subwindow number where the indicator was attached
-   // For indicator_separate_window, this will be 1 (or higher if multiple indicators)
+   // ✅ CRITICAL: For indicator_separate_window, objects must be drawn in the indicator's subwindow
+   // Use ChartWindowOnDropped() but ALWAYS ensure it's not 0 (main chart)
    string short_name = StringFormat("OVO Renko [%s] %s", 
                                      InpPeriodToken,
                                      (InpChartType == RENKO_MEAN ? "Mean" : "Regular"));
    IndicatorSetString(INDICATOR_SHORTNAME, short_name);
    
-   int subwindow = ChartWindowOnDropped();  // ✅ Gets the actual indicator subwindow
-   if(subwindow < 0) subwindow = 1;  // Fallback to subwindow 1
+   int subwindow = ChartWindowOnDropped();
+   Print("ChartWindowOnDropped() returned: ", subwindow);
+   
+   // ✅ FORCE to subwindow 1 if returned 0 or -1
+   // For indicator_separate_window, we MUST draw in subwindow 1+, never 0
+   if(subwindow <= 0)
+   {
+      subwindow = 1;
+      Print("⚠️ Forcing subwindow to 1 (indicator window)");
+   }
+   
+   Print("✅ Using subwindow: ", subwindow, " for panel objects");
    
    g_state = STATE_PANEL_ONLY;
    
