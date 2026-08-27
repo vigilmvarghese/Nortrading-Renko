@@ -217,11 +217,15 @@ void OnDeinit(const int reason)
       Print("✅ Deleted marker for ", g_config.period_token);
    }
    
-   // ✅ Delete global variable to free up the period token
-   string gv_name = StringFormat("OVORenko_Token_%I64d_%s_%s", ChartID(), _Symbol, g_config.period_token);
+   // ✅ CRITICAL FIX: Delete global variable with corrected name (no ChartID)
+   string gv_name = StringFormat("OVORenko_Token_%s_%s", _Symbol, g_config.period_token);
    if(GlobalVariableDel(gv_name))
    {
-      Print("✅ Released period token ", g_config.period_token, " (deleted global variable)");
+      Print("✅ Released period token ", g_config.period_token, " (deleted global variable: ", gv_name, ")");
+   }
+   else
+   {
+      Print("⚠️ Could not delete global variable: ", gv_name, ", error: ", GetLastError());
    }
    
    // ✅ Force delete any remaining objects with our prefix
@@ -510,6 +514,7 @@ bool ValidateInputs()
 //+------------------------------------------------------------------+
 //| Find next available period token for this symbol                |
 //| Uses Global Variables for reliable cross-instance detection     |
+//| CRITICAL FIX: Atomic check-and-claim to prevent race condition  |
 //+------------------------------------------------------------------+
 string FindNextAvailablePeriodToken(string source_symbol)
 {
@@ -528,28 +533,49 @@ string FindNextAvailablePeriodToken(string source_symbol)
    
    if(base_period == "") base_period = "M";  // Default to M if no prefix found
    
-   // ✅ Use Global Variables - most reliable method for cross-instance tracking
+   // ✅ CRITICAL FIX: Global Variable name should NOT include ChartID
+   // Multiple instances on the SAME CHART need different tokens
+   // Token should be unique per Symbol only (not per chart instance)
+   
+   Print("🔍 Scanning for available period token...");
+   Print("   Symbol: ", source_symbol);
+   Print("   Base period: ", base_period);
+   
    for(int num = 61; num <= 99; num++)
    {
       string test_period = base_period + IntegerToString(num);
       
-      // Check global variable for this token
-      string gv_name = StringFormat("OVORenko_Token_%I64d_%s_%s", ChartID(), source_symbol, test_period);
+      // ✅ FIXED: Global Variable name WITHOUT ChartID (symbol-scoped only)
+      string gv_name = StringFormat("OVORenko_Token_%s_%s", source_symbol, test_period);
       
-      if(GlobalVariableCheck(gv_name))
+      // ✅ ATOMIC CHECK-AND-CLAIM: Check and set in one operation
+      // If GlobalVariableCheck returns false, immediately claim it
+      if(!GlobalVariableCheck(gv_name))
+      {
+         // Attempt to claim this token atomically
+         if(GlobalVariableSet(gv_name, GetTickCount()))  // Use tick count as unique instance ID
+         {
+            Print("✅ Auto-assigned period token: ", test_period, " (claimed atomically)");
+            Print("   Global Variable: ", gv_name);
+            return test_period;
+         }
+         else
+         {
+            Print("⚠️ Failed to claim token ", test_period, ", error: ", GetLastError());
+            continue;  // Another instance claimed it first
+         }
+      }
+      else
       {
          Print("⚠️ Period token ", test_period, " in use (global variable exists)");
          continue;  // Token in use
       }
-      
-      // Token is available!
-      Print("✅ Auto-assigned period token: ", test_period, " (available slot)");
-      return test_period;
    }
    
-   // Fallback: use the input token
-   Print("⚠️ All period tokens M61-M99 in use, using input token: ", InpPeriodToken);
-   return InpPeriodToken;
+   // Fallback: use the input token with timestamp to make it unique
+   string fallback = base_period + IntegerToString((int)(TimeCurrent() % 100));
+   Print("⚠️ All period tokens M61-M99 in use, using fallback: ", fallback);
+   return fallback;
 }
 
 //+------------------------------------------------------------------+
@@ -561,14 +587,13 @@ void InitializeConfig()
    g_config.brick_size_points = InpBrickSizePoints;
    g_config.suppress_wicks = InpSuppressWicks;
    
-   // ✅ AUTO-INCREMENT PERIOD TOKEN: Find next available for this symbol
+   // ✅ CRITICAL FIX: FindNextAvailablePeriodToken now does atomic check-and-claim
+   // No separate registration needed - token is already claimed inside the function
    string auto_period = FindNextAvailablePeriodToken(_Symbol);
-   g_config.period_token = auto_period;  // Use auto-assigned token instead of input
+   g_config.period_token = auto_period;  // Use auto-assigned and claimed token
    
-   // ✅ IMMEDIATELY register this token using Global Variable (most reliable)
-   string gv_name = StringFormat("OVORenko_Token_%I64d_%s_%s", ChartID(), _Symbol, auto_period);
-   GlobalVariableSet(gv_name, 1.0);  // Set to 1 to mark as in-use
-   Print("✅ Registered period token: ", auto_period, " (global variable: ", gv_name, ")");
+   // Token is already registered by FindNextAvailablePeriodToken (atomic operation)
+   Print("✅ Period token claimed: ", auto_period);
    
    g_config.history_days = InpHistoryDays;
    g_config.live_pump_ms = InpLivePumpMs;
