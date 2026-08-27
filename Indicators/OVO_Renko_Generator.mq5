@@ -98,10 +98,11 @@ int OnInit()
    if(!ValidateInputs())
       return INIT_PARAMETERS_INCORRECT;
    
+   // ✅ Initialize config FIRST (auto-assigns period token)
    InitializeConfig();
    
    g_persistence.source_symbol = _Symbol;
-   g_persistence.period_token = InpPeriodToken;
+   g_persistence.period_token = g_config.period_token;  // ✅ Use auto-assigned period
    g_persistence.chart_type = InpChartType;
    g_persistence.brick_size = InpBrickSizePoints;
    
@@ -142,13 +143,13 @@ int OnInit()
    
    g_state = STATE_PANEL_ONLY;
    
-   // ✅ Unique prefix for multiple instances support
-   string unique_prefix = StringFormat("OVORenko_%I64d_%s_", ChartID(), InpPeriodToken);
+   // ✅ Unique prefix for multiple instances support (use auto-assigned period)
+   string unique_prefix = StringFormat("OVORenko_%I64d_%s_", ChartID(), g_config.period_token);
    
    g_panel = new CPanelUI(ChartID(), subwindow, unique_prefix, InpVerboseLog);
    g_panel.SetChartType(InpChartType);
    g_panel.SetBrickSize(DoubleToString(InpBrickSizePoints, 0));  // ✅ Uses actual input setting
-   g_panel.SetPeriodText(InpPeriodToken);
+   g_panel.SetPeriodText(g_config.period_token);  // ✅ Show auto-assigned period
    g_panel.SetStatusText("Ready");
    g_panel.CreatePanel();
    
@@ -157,7 +158,7 @@ int OnInit()
    g_live_pump_timer = timer_ms;
    
    Print("✅ Indicator initialized in SUBWINDOW ", subwindow);
-   Print("   Period: ", InpPeriodToken);
+   Print("   Period: ", g_config.period_token, " (auto-assigned)");
    Print("   Type: ", (InpChartType == RENKO_MEAN ? "Mean Renko" : "Regular Renko"));
    Print("   Click period button to generate chart");
    
@@ -343,6 +344,52 @@ bool ValidateInputs()
 }
 
 //+------------------------------------------------------------------+
+//| Find next available period token for this symbol                |
+//+------------------------------------------------------------------+
+string FindNextAvailablePeriodToken(string source_symbol)
+{
+   // Extract base period (M or any prefix) from InpPeriodToken
+   string base_period = "M";
+   int number_start = 0;
+   
+   // Find where the number starts in InpPeriodToken
+   for(int i = 0; i < StringLen(InpPeriodToken); i++)
+   {
+      if(StringGetCharacter(InpPeriodToken, i) >= '0' && StringGetCharacter(InpPeriodToken, i) <= '9')
+      {
+         base_period = StringSubstr(InpPeriodToken, 0, i);
+         break;
+      }
+   }
+   
+   if(base_period == "") base_period = "M";  // Default to M if no prefix found
+   
+   // Check existing custom symbols to find next available number
+   int max_number = 60;  // Start from M61 by default
+   
+   for(int num = 61; num <= 99; num++)
+   {
+      string test_period = base_period + IntegerToString(num);
+      string test_symbol = source_symbol + "." + test_period;
+      
+      // Check if this custom symbol already exists
+      if(!SymbolExist(test_symbol, true))  // true = check custom symbols
+      {
+         Print("✅ Auto-assigned period token: ", test_period, " (custom symbol: ", test_symbol, ")");
+         return test_period;
+      }
+      else
+      {
+         Print("⚠️ Period token ", test_period, " already in use (", test_symbol, " exists)");
+      }
+   }
+   
+   // Fallback: use the input token
+   Print("⚠️ All period tokens M61-M99 in use, using input token: ", InpPeriodToken);
+   return InpPeriodToken;
+}
+
+//+------------------------------------------------------------------+
 //| Initialize configuration                                         |
 //+------------------------------------------------------------------+
 void InitializeConfig()
@@ -350,7 +397,11 @@ void InitializeConfig()
    g_config.chart_type = InpChartType;
    g_config.brick_size_points = InpBrickSizePoints;
    g_config.suppress_wicks = InpSuppressWicks;
-   g_config.period_token = InpPeriodToken;
+   
+   // ✅ AUTO-INCREMENT PERIOD TOKEN: Find next available for this symbol
+   string auto_period = FindNextAvailablePeriodToken(_Symbol);
+   g_config.period_token = auto_period;  // Use auto-assigned token instead of input
+   
    g_config.history_days = InpHistoryDays;
    g_config.live_pump_ms = InpLivePumpMs;
    g_config.enable_tick_cache = InpEnableTickCache;
@@ -363,6 +414,11 @@ void InitializeConfig()
    g_config.enable_diagnostics = InpMeanRenkoDiagnostics;
    
    g_runtime_brick_size = InpBrickSizePoints;
+   
+   Print("📊 Configuration initialized:");
+   Print("   Symbol: ", _Symbol);
+   Print("   Period Token: ", g_config.period_token, " (auto-assigned)");
+   Print("   Input Token: ", InpPeriodToken, " (reference only)");
 }
 
 //+------------------------------------------------------------------+
