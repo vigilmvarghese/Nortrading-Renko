@@ -806,24 +806,24 @@ void StartRebuild()
    Print("=== Starting SYNCHRONOUS Rebuild ===");
    
    // ✅ CRITICAL FIX: Check if this custom symbol is already owned by another chart
-   string custom_symbol = _Symbol + "." + g_config.period_token;
-   string owner_gv = StringFormat("OVORenko_Owner_%s", custom_symbol);
-   long current_chart = ChartID();
+   string expected_symbol = _Symbol + "." + g_config.period_token;
+   string ownership_gv = StringFormat("OVORenko_Owner_%s", expected_symbol);
+   long this_chart = ChartID();
    
-   if(GlobalVariableCheck(owner_gv))
+   if(GlobalVariableCheck(ownership_gv))
    {
-      long owner_chart_id = (long)GlobalVariableGet(owner_gv);
+      long owner_chart_id = (long)GlobalVariableGet(ownership_gv);
       
       // If owned by a different chart, check if that chart still exists
-      if(owner_chart_id != current_chart && owner_chart_id > 0)
+      if(owner_chart_id != this_chart && owner_chart_id > 0)
       {
          string owner_symbol = ChartSymbol(owner_chart_id);
          
          if(owner_symbol != "" && owner_symbol != NULL)
          {
             // Owner chart still exists - this is a collision!
-            Print("❌ ERROR: Custom symbol ", custom_symbol, " is already in use by Chart ", owner_chart_id);
-            Print("   Current chart: ", current_chart);
+            Print("❌ ERROR: Custom symbol ", expected_symbol, " is already in use by Chart ", owner_chart_id);
+            Print("   Current chart: ", this_chart);
             Print("   Owner chart: ", owner_chart_id, " (", owner_symbol, ")");
             
             Alert("Period token ", g_config.period_token, " collision!\nAnother ", _Symbol, 
@@ -838,14 +838,14 @@ void StartRebuild()
          else
          {
             // Owner chart was closed - we can take over
-            Print("⚠️ Previous owner chart ", owner_chart_id, " no longer exists - taking over ", custom_symbol);
+            Print("⚠️ Previous owner chart ", owner_chart_id, " no longer exists - taking over ", expected_symbol);
          }
       }
    }
    
    // Claim ownership of this custom symbol
-   GlobalVariableSet(owner_gv, (double)current_chart);
-   Print("✅ Claimed ownership of ", custom_symbol, " for chart ", current_chart);
+   GlobalVariableSet(ownership_gv, (double)this_chart);
+   Print("✅ Claimed ownership of ", expected_symbol, " for chart ", this_chart);
    
    g_rebuild_requested = false;
    
@@ -921,10 +921,12 @@ void StartRebuild()
    Print("✅ Published successfully - chart cleaned and regenerated");
    
    // ⚡ CRITICAL: Force complete chart reload to clear old cached bars
-   // Note: custom_symbol, owner_gv, current_chart already declared at function start
+   string custom_symbol = g_publisher.GetCustomSymbolName();
    
    // ✅ FIXED: Only close charts that belong to THIS generator instance
-   // Check ownership before closing (reuse already declared owner_gv variable)
+   // Check ownership before closing
+   string owner_gv = StringFormat("OVORenko_Owner_%s", custom_symbol);
+   long current_chart = ChartID();
    long owner_chart_id = current_chart;  // Assume we own it
    
    if(GlobalVariableCheck(owner_gv))
