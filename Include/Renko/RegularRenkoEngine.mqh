@@ -35,12 +35,15 @@ private:
    bool              m_is_bullish;             // Current trend direction
    bool              m_initialized;            // Initialization flag
    
+   datetime          m_last_brick_time;        // Last brick timestamp
+   int               m_brick_time_step;        // Time step between bricks (seconds)
+   
 public:
    //--- Constructor
    CRegularRenkoEngine(string symbol = "", bool verbose = false)
       : m_symbol(symbol), m_brick_size_points(600), m_suppress_wicks(false),
         m_verbose(verbose), m_completed_count(0), m_is_bullish(true),
-        m_initialized(false)
+        m_initialized(false), m_last_brick_time(0), m_brick_time_step(60)
    {
       if(m_symbol == "")
          m_symbol = _Symbol;
@@ -78,6 +81,7 @@ public:
       m_is_bullish = true;
       m_initialized = true;
       m_completed_count = 0;
+      m_last_brick_time = initial_time;
       
       ArrayResize(m_completed_bricks, 0);
       
@@ -196,6 +200,12 @@ public:
       RenkoBrick completed = m_forming_brick;
       completed.is_forming = false;
       
+      // Assign unique sequential timestamp
+      m_last_brick_time = m_last_brick_time + m_brick_time_step;
+      if(m_last_brick_time < tick_time)
+         m_last_brick_time = tick_time;
+      completed.time = m_last_brick_time;
+      
       // Set bullish brick OHLC
       completed.open = NormalizeDouble(m_trend_low, m_digits);
       completed.close = NormalizeDouble(m_trend_low + m_brick_size_price, m_digits);
@@ -219,7 +229,7 @@ public:
       
       // Start new forming brick
       m_forming_brick.Reset();
-      m_forming_brick.time = tick_time;
+      m_forming_brick.time = m_last_brick_time;
       m_forming_brick.open = completed.close;
       m_forming_brick.high = completed.close;
       m_forming_brick.low = completed.close;
@@ -228,7 +238,7 @@ public:
       m_forming_brick.tick_volume = 1;
       
       if(m_verbose)
-         Print("Completed bullish brick: ", completed.open, " -> ", completed.close);
+         Print("Completed bullish brick: ", completed.open, " -> ", completed.close, " time: ", TimeToString(completed.time));
    }
    
    //--- Complete bearish brick
@@ -236,6 +246,12 @@ public:
    {
       RenkoBrick completed = m_forming_brick;
       completed.is_forming = false;
+      
+      // Assign unique sequential timestamp
+      m_last_brick_time = m_last_brick_time + m_brick_time_step;
+      if(m_last_brick_time < tick_time)
+         m_last_brick_time = tick_time;
+      completed.time = m_last_brick_time;
       
       // Set bearish brick OHLC
       completed.open = NormalizeDouble(m_trend_high, m_digits);
@@ -260,7 +276,7 @@ public:
       
       // Start new forming brick
       m_forming_brick.Reset();
-      m_forming_brick.time = tick_time;
+      m_forming_brick.time = m_last_brick_time;
       m_forming_brick.open = completed.close;
       m_forming_brick.high = completed.close;
       m_forming_brick.low = completed.close;
@@ -269,7 +285,7 @@ public:
       m_forming_brick.tick_volume = 1;
       
       if(m_verbose)
-         Print("Completed bearish brick: ", completed.open, " -> ", completed.close);
+         Print("Completed bearish brick: ", completed.open, " -> ", completed.close, " time: ", TimeToString(completed.time));
    }
    
    //--- Get completed bricks
@@ -298,6 +314,7 @@ public:
       m_trend_low = 0;
       m_is_bullish = true;
       m_initialized = false;
+      m_last_brick_time = 0;
    }
    
    //--- Get state

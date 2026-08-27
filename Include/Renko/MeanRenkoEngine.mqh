@@ -40,6 +40,9 @@ private:
    bool              m_is_bullish;             // Current trend direction
    bool              m_initialized;            // Initialization flag
    
+   datetime          m_last_brick_time;        // Last brick timestamp
+   int               m_brick_time_step;        // Time step between bricks (seconds)
+   
    //--- Diagnostic file handle
    int               m_diag_handle;
    bool              m_enable_diagnostics;
@@ -50,7 +53,7 @@ public:
       : m_symbol(symbol), m_step_points(600), m_suppress_wicks(false),
         m_verbose(verbose), m_completed_count(0), m_is_bullish(true),
         m_initialized(false), m_last_body_midpoint(0), m_diag_handle(INVALID_HANDLE),
-        m_enable_diagnostics(false)
+        m_enable_diagnostics(false), m_last_brick_time(0), m_brick_time_step(60)
    {
       if(m_symbol == "")
          m_symbol = _Symbol;
@@ -112,6 +115,7 @@ public:
       m_is_bullish = true;
       m_initialized = true;
       m_completed_count = 0;
+      m_last_brick_time = initial_time;
       
       ArrayResize(m_completed_bricks, 0);
       
@@ -245,6 +249,12 @@ public:
       RenkoBrick completed = m_forming_brick;
       completed.is_forming = false;
       
+      // Assign unique sequential timestamp
+      m_last_brick_time = m_last_brick_time + m_brick_time_step;
+      if(m_last_brick_time < tick_time)
+         m_last_brick_time = tick_time;
+      completed.time = m_last_brick_time;
+      
       // Calculate new brick open around previous body midpoint
       double new_open = NormalizeDouble(m_last_body_midpoint - m_step_price, m_digits);
       double new_close = NormalizeDouble(new_open + m_body_price, m_digits);
@@ -276,7 +286,7 @@ public:
       
       // Start new forming brick
       m_forming_brick.Reset();
-      m_forming_brick.time = tick_time;
+      m_forming_brick.time = m_last_brick_time;
       m_forming_brick.open = completed.close;
       m_forming_brick.high = completed.close;
       m_forming_brick.low = completed.close;
@@ -287,7 +297,7 @@ public:
       if(m_verbose)
       {
          Print("Completed Mean bullish brick: ", completed.open, " -> ", completed.close,
-               " (midpoint=", m_last_body_midpoint, ")");
+               " (midpoint=", m_last_body_midpoint, ") time: ", TimeToString(completed.time));
       }
       
       WriteDiagnostic("BULL_COMPLETE", tick_time, completed.close, 1, 
@@ -299,6 +309,12 @@ public:
    {
       RenkoBrick completed = m_forming_brick;
       completed.is_forming = false;
+      
+      // Assign unique sequential timestamp
+      m_last_brick_time = m_last_brick_time + m_brick_time_step;
+      if(m_last_brick_time < tick_time)
+         m_last_brick_time = tick_time;
+      completed.time = m_last_brick_time;
       
       // Calculate new brick open around previous body midpoint
       double new_open = NormalizeDouble(m_last_body_midpoint + m_step_price, m_digits);
@@ -331,7 +347,7 @@ public:
       
       // Start new forming brick
       m_forming_brick.Reset();
-      m_forming_brick.time = tick_time;
+      m_forming_brick.time = m_last_brick_time;
       m_forming_brick.open = completed.close;
       m_forming_brick.high = completed.close;
       m_forming_brick.low = completed.close;
@@ -342,7 +358,7 @@ public:
       if(m_verbose)
       {
          Print("Completed Mean bearish brick: ", completed.open, " -> ", completed.close,
-               " (midpoint=", m_last_body_midpoint, ")");
+               " (midpoint=", m_last_body_midpoint, ") time: ", TimeToString(completed.time));
       }
       
       WriteDiagnostic("BEAR_COMPLETE", tick_time, completed.close, 1,
@@ -376,6 +392,7 @@ public:
       m_current_low = 0;
       m_is_bullish = true;
       m_initialized = false;
+      m_last_brick_time = 0;
    }
    
    //--- Get state
