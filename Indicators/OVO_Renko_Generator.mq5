@@ -244,43 +244,33 @@ void OnTimer()
    // ✅ FIRST: Check if we need to create the panel (deferred from OnInit)
    if(g_state == STATE_INITIALIZING && g_panel == NULL)
    {
-      // Try multiple methods to find our indicator window
-      // Method 1: Search by short name
-      string short_name = StringFormat("OVO Renko [%s] %s", 
-                                        g_config.period_token,
-                                        (InpChartType == RENKO_MEAN ? "Mean" : "Regular"));
-      int subwindow = ChartWindowFind(ChartID(), short_name);
+      // ✅ CRITICAL: Use the LAST window (newest indicator window)
+      // When an indicator is attached, MT5 creates a new subwindow at the END
+      int total_windows = (int)ChartGetInteger(ChartID(), CHART_WINDOWS_TOTAL);
+      int subwindow = -1;
       
-      // Method 2: If not found, try without space after bracket
-      if(subwindow < 0)
+      if(total_windows > 1)
       {
-         string alt_name = StringFormat("OVO Renko [%s]%s", 
-                                         g_config.period_token,
-                                         (InpChartType == RENKO_MEAN ? "Mean" : "Regular"));
-         subwindow = ChartWindowFind(ChartID(), alt_name);
+         // The LAST window (total_windows - 1) should be ours
+         subwindow = total_windows - 1;
+         Print("📊 Total windows: ", total_windows, ", using LAST window: ", subwindow);
       }
       
-      // Method 3: Iterate through all windows to find ours
-      if(subwindow < 0)
+      // ✅ Verify we can create objects in this window
+      if(subwindow > 0)
       {
-         int total_windows = (int)ChartGetInteger(ChartID(), CHART_WINDOWS_TOTAL);
-         Print("📊 Total chart windows: ", total_windows);
-         
-         for(int i = 1; i < total_windows; i++)  // Start from 1 (skip main chart)
+         string test_name = StringFormat("Test_%s_%I64d", g_config.period_token, ChartID());
+         if(ObjectCreate(ChartID(), test_name, OBJ_LABEL, subwindow, 0, 0))
          {
-            // Check if this window belongs to our indicator by trying to create a test object
-            string test_name = StringFormat("Test_%s_%d", g_config.period_token, i);
-            if(ObjectCreate(ChartID(), test_name, OBJ_LABEL, i, 0, 0))
-            {
-               ObjectDelete(ChartID(), test_name);
-               subwindow = i;
-               Print("✅ Found available window by iteration: ", i);
-               break;
-            }
+            ObjectDelete(ChartID(), test_name);
+            Print("✅ Verified window ", subwindow, " is accessible");
+         }
+         else
+         {
+            Print("❌ Cannot create objects in window ", subwindow);
+            subwindow = -1;
          }
       }
-      
-      Print("📍 [OnTimer] Final subwindow: ", subwindow);
       
       if(subwindow > 0)
       {
@@ -305,6 +295,10 @@ void OnTimer()
          if(panel_created)
          {
             Print("✅ Panel created successfully in subwindow ", subwindow);
+            
+            // ✅ Force a chart redraw to make objects visible
+            ChartRedraw(ChartID());
+            
             g_state = STATE_PANEL_ONLY;
          }
          else

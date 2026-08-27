@@ -126,7 +126,13 @@ public:
       if(m_verbose)
          Print("Creating background: chart=", m_chart_id, " subwindow=", m_subwindow, " name=", name);
       
-      ObjectCreate(m_chart_id, name, OBJ_RECTANGLE_LABEL, m_subwindow, 0, 0);
+      if(!ObjectCreate(m_chart_id, name, OBJ_RECTANGLE_LABEL, m_subwindow, 0, 0))
+      {
+         Print("❌ ERROR: Failed to create background object in subwindow ", m_subwindow);
+         Print("   Error code: ", GetLastError());
+         return;
+      }
+      
       ObjectSetInteger(m_chart_id, name, OBJPROP_XDISTANCE, 0);
       ObjectSetInteger(m_chart_id, name, OBJPROP_YDISTANCE, 0);  // ✅ Top of subwindow
       ObjectSetInteger(m_chart_id, name, OBJPROP_XSIZE, m_panel_width);
@@ -135,7 +141,7 @@ public:
       ObjectSetInteger(m_chart_id, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
       ObjectSetInteger(m_chart_id, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
       ObjectSetInteger(m_chart_id, name, OBJPROP_SELECTABLE, false);
-      ObjectSetInteger(m_chart_id, name, OBJPROP_BACK, true);
+      ObjectSetInteger(m_chart_id, name, OBJPROP_BACK, false);  // ✅ FRONT (not behind chart)
       
       if(m_verbose)
          Print("Background created: ", (ObjectFind(m_chart_id, name) >= 0 ? "SUCCESS" : "FAILED"));
@@ -147,7 +153,12 @@ public:
       string name = m_prefix + "TypeLabel";
       string text = (m_chart_type == RENKO_REGULAR) ? "Renko:" : "Mean Renko:";
       
-      ObjectCreate(m_chart_id, name, OBJ_LABEL, m_subwindow, 0, 0);
+      if(!ObjectCreate(m_chart_id, name, OBJ_LABEL, m_subwindow, 0, 0))
+      {
+         Print("❌ ERROR: Failed to create chart type label. Error: ", GetLastError());
+         return;
+      }
+      
       ObjectSetInteger(m_chart_id, name, OBJPROP_XDISTANCE, 5);
       ObjectSetInteger(m_chart_id, name, OBJPROP_YDISTANCE, 4);  // ✅ Top of subwindow
       ObjectSetInteger(m_chart_id, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
@@ -157,6 +168,7 @@ public:
       ObjectSetInteger(m_chart_id, name, OBJPROP_FONTSIZE, 9);
       ObjectSetInteger(m_chart_id, name, OBJPROP_COLOR, clrWhite);  // ✅ WHITE text
       ObjectSetInteger(m_chart_id, name, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(m_chart_id, name, OBJPROP_BACK, false);  // ✅ FRONT
    }
    
    //--- Create brick size field (WHITE input field)
@@ -164,7 +176,12 @@ public:
    {
       string name = m_prefix + "BrickField";
       
-      ObjectCreate(m_chart_id, name, OBJ_EDIT, m_subwindow, 0, 0);
+      if(!ObjectCreate(m_chart_id, name, OBJ_EDIT, m_subwindow, 0, 0))
+      {
+         Print("❌ ERROR: Failed to create brick field. Error: ", GetLastError());
+         return;
+      }
+      
       ObjectSetInteger(m_chart_id, name, OBJPROP_XDISTANCE, m_brick_field_x);
       ObjectSetInteger(m_chart_id, name, OBJPROP_YDISTANCE, m_brick_field_y);
       ObjectSetInteger(m_chart_id, name, OBJPROP_XSIZE, 60);
@@ -180,6 +197,7 @@ public:
       ObjectSetInteger(m_chart_id, name, OBJPROP_ALIGN, ALIGN_CENTER);
       ObjectSetInteger(m_chart_id, name, OBJPROP_READONLY, false);
       ObjectSetInteger(m_chart_id, name, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(m_chart_id, name, OBJPROP_BACK, false);  // ✅ FRONT
    }
    
    //--- Create period button
@@ -187,7 +205,12 @@ public:
    {
       string name = m_prefix + "PeriodButton";
       
-      ObjectCreate(m_chart_id, name, OBJ_BUTTON, m_subwindow, 0, 0);
+      if(!ObjectCreate(m_chart_id, name, OBJ_BUTTON, m_subwindow, 0, 0))
+      {
+         Print("❌ ERROR: Failed to create period button. Error: ", GetLastError());
+         return;
+      }
+      
       ObjectSetInteger(m_chart_id, name, OBJPROP_XDISTANCE, m_period_button_x);
       ObjectSetInteger(m_chart_id, name, OBJPROP_YDISTANCE, m_period_button_y);
       ObjectSetInteger(m_chart_id, name, OBJPROP_XSIZE, 50);
@@ -201,6 +224,7 @@ public:
       ObjectSetInteger(m_chart_id, name, OBJPROP_BORDER_COLOR, clrBlue);
       ObjectSetInteger(m_chart_id, name, OBJPROP_SELECTABLE, false);
       ObjectSetInteger(m_chart_id, name, OBJPROP_STATE, false);
+      ObjectSetInteger(m_chart_id, name, OBJPROP_BACK, false);  // ✅ FRONT
    }
    
    //--- Create status label (WHITE text on black background)
@@ -208,7 +232,12 @@ public:
    {
       string name = m_prefix + "Status";
       
-      ObjectCreate(m_chart_id, name, OBJ_LABEL, m_subwindow, 0, 0);
+      if(!ObjectCreate(m_chart_id, name, OBJ_LABEL, m_subwindow, 0, 0))
+      {
+         Print("❌ ERROR: Failed to create status label. Error: ", GetLastError());
+         return;
+      }
+      
       ObjectSetInteger(m_chart_id, name, OBJPROP_XDISTANCE, m_status_x);
       ObjectSetInteger(m_chart_id, name, OBJPROP_YDISTANCE, m_status_y);
       ObjectSetInteger(m_chart_id, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
@@ -218,6 +247,7 @@ public:
       ObjectSetInteger(m_chart_id, name, OBJPROP_FONTSIZE, 9);
       ObjectSetInteger(m_chart_id, name, OBJPROP_COLOR, clrLimeGreen);  // ✅ Lime green status text
       ObjectSetInteger(m_chart_id, name, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(m_chart_id, name, OBJPROP_BACK, false);  // ✅ FRONT
    }
    
    //--- Create close button
@@ -225,7 +255,12 @@ public:
    {
       string name = m_prefix + "CloseButton";
       
-      ObjectCreate(m_chart_id, name, OBJ_BUTTON, m_subwindow, 0, 0);
+      if(!ObjectCreate(m_chart_id, name, OBJ_BUTTON, m_subwindow, 0, 0))
+      {
+         Print("❌ ERROR: Failed to create close button. Error: ", GetLastError());
+         return;
+      }
+      
       ObjectSetInteger(m_chart_id, name, OBJPROP_XDISTANCE, m_close_button_x);
       ObjectSetInteger(m_chart_id, name, OBJPROP_YDISTANCE, m_close_button_y);
       ObjectSetInteger(m_chart_id, name, OBJPROP_XSIZE, 20);
@@ -239,6 +274,7 @@ public:
       ObjectSetInteger(m_chart_id, name, OBJPROP_BORDER_COLOR, clrDarkRed);
       ObjectSetInteger(m_chart_id, name, OBJPROP_SELECTABLE, false);
       ObjectSetInteger(m_chart_id, name, OBJPROP_STATE, false);
+      ObjectSetInteger(m_chart_id, name, OBJPROP_BACK, false);  // ✅ FRONT
    }
    
    //--- Delete panel
