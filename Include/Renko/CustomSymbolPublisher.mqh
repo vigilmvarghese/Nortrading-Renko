@@ -106,13 +106,36 @@ public:
    }
    
    //+------------------------------------------------------------------+
-   //| EXACT OVO PublishRebuiltHistory() - Lines 1864-1895            |
-   //| Atomic replacement using CustomRatesReplace                     |
+   //| FIXED: Clear and Replace History - Proper cleanup               |
+   //| OVO Pattern + Explicit Delete for clean regeneration           |
    //+------------------------------------------------------------------+
    bool ReplaceHistory(const RenkoBrick &bricks[], int count)
    {
       if(!m_symbol_created || count <= 0)
          return false;
+      
+      if(m_verbose)
+         PrintFormat("Replacing history: %d bricks", count);
+      
+      // ✅ CRITICAL FIX: Explicitly delete ALL old bars before replacing
+      // This ensures clean slate when regenerating with different brick size
+      datetime delete_from = D'1970.01.01 00:00';
+      datetime delete_to = D'2099.12.31 23:59';
+      
+      ResetLastError();
+      if(!CustomRatesDelete(m_custom_symbol, delete_from, delete_to))
+      {
+         int err = GetLastError();
+         if(m_verbose && err != 0)
+            PrintFormat("CustomRatesDelete returned false (may be normal). Error=%d", err);
+      }
+      else if(m_verbose)
+      {
+         Print("Successfully deleted old bars");
+      }
+      
+      // Small delay to ensure deletion is processed
+      Sleep(100);
       
       // Convert bricks to MqlRates
       MqlRates rates[];
@@ -130,13 +153,15 @@ public:
          rates[i].real_volume = bricks[i].real_volume;
       }
       
-      // ✅ CRITICAL OVO PATTERN: Atomic replacement using CustomRatesReplace
-      // This works while the custom-symbol chart is open and removes stale
-      // candles that belonged to the previous brick size
+      // Get time range from actual data
+      datetime first_time = rates[0].time;
+      datetime last_time = rates[count - 1].time + 86400;  // Add 1 day buffer
+      
+      // ✅ ATOMIC REPLACEMENT: Now replacing into clean slate
       ResetLastError();
       int written = CustomRatesReplace(m_custom_symbol,
-                                       D'1970.01.01 00:00',
-                                       D'2099.12.31 23:59',
+                                       first_time,
+                                       last_time,
                                        rates);
       
       if(written < 0)
@@ -147,7 +172,7 @@ public:
       }
       
       if(m_verbose)
-         PrintFormat("Atomic history replacement complete. rates=%d", written);
+         PrintFormat("✅ History replacement complete: %d bars written (clean regeneration)", written);
       
       return true;
    }

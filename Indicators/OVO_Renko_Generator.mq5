@@ -466,7 +466,7 @@ void StartRebuild()
    RenkoBrick results[];
    int count = g_builder.GetResults(results);
    
-   Print("Publishing ", count, " bricks (history complete instantly)");
+   Print("Publishing ", count, " bricks (clean regeneration - old bars removed)");
    
    // Publish to custom symbol
    if(!g_publisher.ReplaceHistory(results, count))
@@ -478,8 +478,25 @@ void StartRebuild()
       return;
    }
    
-   // Open/switch to chart
+   Print("✅ Published successfully - chart cleaned and regenerated");
+   
+   // ⚡ Force chart to reload data after clean regeneration
    string custom_symbol = g_publisher.GetCustomSymbolName();
+   
+   // Find existing chart first
+   long existing_chart_id = g_chart_manager.FindChart(custom_symbol);
+   if(existing_chart_id > 0)
+   {
+      // Chart exists - refresh it to clear old cached data
+      ChartSetSymbolPeriod(existing_chart_id, custom_symbol, PERIOD_M1);
+      ChartNavigate(existing_chart_id, CHART_END, 0);
+      ChartRedraw(existing_chart_id);
+      
+      if(InpVerboseLog)
+         Print("Refreshed existing chart to show new data");
+   }
+   
+   // Open/switch to chart
    long chart_id = g_chart_manager.OpenChart(custom_symbol, g_explicit_button_click);
    
    if(chart_id == 0)
