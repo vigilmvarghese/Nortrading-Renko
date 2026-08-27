@@ -261,32 +261,37 @@ void OnTimer()
    // ✅ FIRST: Check if we need to create the panel (deferred from OnInit)
    if(g_state == STATE_INITIALIZING && g_panel == NULL)
    {
-      // ✅ CRITICAL: Use the LAST window (newest indicator window)
-      // When an indicator is attached, MT5 creates a new subwindow at the END
-      int total_windows = (int)ChartGetInteger(ChartID(), CHART_WINDOWS_TOTAL);
-      int subwindow = -1;
+      // ✅ OVO PATTERN: Find our subwindow by the indicator's unique short name
+      // Each instance has a unique short name set in OnInit (includes period token)
+      string short_name = StringFormat("OVO Renko [%s] %s", 
+                                        g_config.period_token,
+                                        (InpChartType == RENKO_MEAN ? "Mean" : "Regular"));
       
-      if(total_windows > 1)
+      int subwindow = ChartWindowFind(ChartID(), short_name);
+      
+      if(subwindow < 0)
       {
-         // The LAST window (total_windows - 1) should be ours
-         subwindow = total_windows - 1;
-         Print("📊 Total windows: ", total_windows, ", using LAST window: ", subwindow);
+         // Window not found yet - MT5 may still be creating it
+         static int wait_count = 0;
+         wait_count++;
+         if(wait_count % 10 == 0)  // Log every 10 attempts
+            Print("⏳ Waiting for indicator window... (attempt ", wait_count, ")");
+         return;  // Try again on next timer tick
       }
       
+      Print("📊 Found our subwindow: ", subwindow, " (by name: ", short_name, ")");
+      
       // ✅ Verify we can create objects in this window
-      if(subwindow > 0)
+      string test_name = StringFormat("Test_%s_%I64d", g_config.period_token, ChartID());
+      if(ObjectCreate(ChartID(), test_name, OBJ_LABEL, subwindow, 0, 0))
       {
-         string test_name = StringFormat("Test_%s_%I64d", g_config.period_token, ChartID());
-         if(ObjectCreate(ChartID(), test_name, OBJ_LABEL, subwindow, 0, 0))
-         {
-            ObjectDelete(ChartID(), test_name);
-            Print("✅ Verified window ", subwindow, " is accessible");
-         }
-         else
-         {
-            Print("❌ Cannot create objects in window ", subwindow);
-            subwindow = -1;
-         }
+         ObjectDelete(ChartID(), test_name);
+         Print("✅ Verified window ", subwindow, " is accessible");
+      }
+      else
+      {
+         Print("❌ Cannot create objects in window ", subwindow);
+         return;
       }
       
       if(subwindow > 0)
@@ -325,13 +330,6 @@ void OnTimer()
          {
             Print("❌ ERROR: Panel creation failed!");
          }
-      }
-      else
-      {
-         static int wait_count = 0;
-         wait_count++;
-         if(wait_count % 10 == 0)  // Log every 10 attempts
-            Print("⏳ Still waiting for indicator window... (attempt ", wait_count, ")");
       }
       
       return;  // Don't process other states yet
