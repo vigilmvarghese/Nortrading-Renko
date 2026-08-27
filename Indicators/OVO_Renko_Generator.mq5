@@ -107,6 +107,7 @@ int OnInit()
    // ✅ CRITICAL: Set buffer binding to force separate window creation
    SetIndexBuffer(0, g_dummy_buffer, INDICATOR_DATA);
    PlotIndexSetInteger(0, PLOT_DRAW_TYPE, DRAW_NONE);
+   PlotIndexSetString(0, PLOT_LABEL, "");  // ✅ Empty label (no text in data window)
    
    if(!ValidateInputs())
       return INIT_PARAMETERS_INCORRECT;
