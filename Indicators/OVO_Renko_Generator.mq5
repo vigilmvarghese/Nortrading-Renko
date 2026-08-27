@@ -229,8 +229,8 @@ void OnDeinit(const int reason)
       Print("✅ Deleted marker for ", g_config.period_token);
    }
    
-   // ✅ CRITICAL FIX: Delete global variable with corrected name (no ChartID)
-   string gv_name = StringFormat("OVORenko_Token_%s_%s", _Symbol, g_config.period_token);
+   // ✅ CRITICAL FIX: Delete global variable with ChartID included
+   string gv_name = StringFormat("OVORenko_Token_%I64d_%s_%s", ChartID(), _Symbol, g_config.period_token);
    if(GlobalVariableDel(gv_name))
    {
       Print("✅ Released period token ", g_config.period_token, " (deleted global variable: ", gv_name, ")");
@@ -623,11 +623,14 @@ string FindNextAvailablePeriodToken(string source_symbol)
    
    if(base_period == "") base_period = "M";  // Default to M if no prefix found
    
-   // ✅ CRITICAL FIX: Global Variable name should NOT include ChartID
-   // Multiple instances on the SAME CHART need different tokens
-   // Token should be unique per Symbol only (not per chart instance)
+   // ✅ CRITICAL: Token allocation is per-chart, not per-symbol
+   // Each source chart gets its own independent token sequence (M61, M62, M63...)
+   // Even if multiple charts have the same symbol (e.g., two US30 charts)
+   
+   long chart_id = ChartID();
    
    Print("🔍 Scanning for available period token...");
+   Print("   Chart ID: ", chart_id);
    Print("   Symbol: ", source_symbol);
    Print("   Base period: ", base_period);
    
@@ -635,8 +638,9 @@ string FindNextAvailablePeriodToken(string source_symbol)
    {
       string test_period = base_period + IntegerToString(num);
       
-      // ✅ FIXED: Global Variable name WITHOUT ChartID (symbol-scoped only)
-      string gv_name = StringFormat("OVORenko_Token_%s_%s", source_symbol, test_period);
+      // ✅ FIXED: Include ChartID so each source chart has independent token pool
+      // This allows: US30 Chart A: M61,M62,M63... and US30 Chart B: M61,M62,M63...
+      string gv_name = StringFormat("OVORenko_Token_%I64d_%s_%s", chart_id, source_symbol, test_period);
       
       // ✅ ATOMIC CHECK-AND-CLAIM: Check and set in one operation
       // If GlobalVariableCheck returns false, immediately claim it
