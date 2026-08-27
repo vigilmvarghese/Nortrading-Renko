@@ -178,8 +178,19 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
-   Print("=== OVO Renko Generator Deinitializing ===");
+   Print("=== OVO Renko Generator [", g_config.period_token, "] Deinitializing ===");
    Print("Reason: ", GetDeinitReasonText(reason));
+   Print("Current state: ", g_state);
+   Print("Our subwindow: ", g_our_subwindow);
+   Print("Our prefix: OVORenko_", ChartID(), "_", g_config.period_token, "_");
+   
+   // ⚠️ CRITICAL: Only clean up if we're being removed, not if it's a recompile/reinit
+   // During parallel initialization of multiple instances, we might get spurious OnDeinit calls
+   if(reason == REASON_RECOMPILE || reason == REASON_INITFAILED)
+   {
+      Print("⏭️ Skipping cleanup (recompile/init) - objects should persist");
+      return;  // Don't delete objects, MT5 will reinitialize
+   }
    
    // ✅ Save persistence state based on current state
    // - If STATE_LIVE: Mark as active so auto-resume works on MT5 restart
@@ -205,6 +216,7 @@ void OnDeinit(const int reason)
    // ✅ Clean up panel objects first
    if(g_panel != NULL)
    {
+      Print("Deleting panel objects with prefix: OVORenko_", ChartID(), "_", g_config.period_token, "_");
       delete g_panel;  // Destructor calls DeletePanel()
       g_panel = NULL;
    }
@@ -228,13 +240,17 @@ void OnDeinit(const int reason)
       Print("⚠️ Could not delete global variable: ", gv_name, ", error: ", GetLastError());
    }
    
-   // ✅ Force delete any remaining objects with our prefix
+   // ✅ Force delete any remaining objects with our prefix ONLY IN OUR WINDOW
    string prefix = StringFormat("OVORenko_%I64d_%s_", ChartID(), g_config.period_token);
-   ObjectsDeleteAll(ChartID(), prefix, g_our_subwindow, -1);  // -1 = all object types
+   if(g_our_subwindow > 0)
+   {
+      int deleted = ObjectsDeleteAll(ChartID(), prefix, g_our_subwindow, -1);  // -1 = all object types
+      Print("Deleted ", deleted, " objects with prefix '", prefix, "' from window ", g_our_subwindow);
+   }
    
    DestroyComponents();
    
-   Print("Deinitialization complete");
+   Print("Deinitialization complete for ", g_config.period_token);
 }
 
 //+------------------------------------------------------------------+
@@ -301,60 +317,62 @@ void OnTimer()
          {
             Print("   Checking window ", w, "...");
             
-            // Try to create a marker object with our unique name
-            string marker = g_unique_name + "_marker";
+            // ✅ CRITICAL FIX: Check if window is occupied by ANY OVORenko panel first
+            bool window_occupied = false;
+            int obj_total = ObjectsTotal(ChartID(), w, -1);
             
-            // Check if our marker already exists in this window (we already claimed it)
-            int marker_window = ObjectFind(ChartID(), marker);
-            if(marker_window == w)
-            {
-               subwindow = w;
-               Print("   ✅ Found our marker in window ", w);
-               break;
-            }
-            
-            // Check if window is unclaimed by trying to find any of our objects
-            string test_bg = StringFormat("OVORenko_%I64d_%s_BG", ChartID(), g_config.period_token);
-            int bg_window = ObjectFind(ChartID(), test_bg);
-            if(bg_window == w)
-            {
-               // We already have a panel in this window
-               subwindow = w;
-               Print("   ✅ Found our panel objects in window ", w);
-               break;
-            }
-            
-            // Check if this window is empty (no other instance's marker)
-            bool window_free = true;
-            int total_objects = ObjectsTotal(ChartID(), w, -1);  // All objects in window
-            
-            for(int i = 0; i < total_objects; i++)
+            for(int i = 0; i < obj_total; i++)
             {
                string obj_name = ObjectName(ChartID(), i, w, -1);
-               if(StringFind(obj_name, "_marker") >= 0 && StringFind(obj_name, g_unique_name) < 0)
+               
+               // Check if this object belongs to an OVORenko panel
+               if(StringFind(obj_name, "OVORenko_") == 0)  // Starts with "OVORenko_"
                {
-                  // Another instance's marker found
-                  Print("   ⚠️ Window ", w, " has another marker: ", obj_name);
-                  window_free = false;
-                  break;
+                  // Check if it's OUR object or another instance's object
+                  string our_prefix = StringFormat("OVORenko_%I64d_%s_", ChartID(), g_config.period_token);
+                  
+                  if(StringFind(obj_name, our_prefix) == 0)
+                  {
+                     // It's OUR object - we already claimed this window
+                     subwindow = w;
+                     Print("   ✅ Found our existing panel in window ", w);
+                     window_occupied = false;  // Not occupied by ANOTHER instance
+                     break;
+                  }
+                  else
+                  {
+                     // It's ANOTHER instance's object - window is occupied
+                     Print("   ⚠️ Window ", w, " occupied by another instance: ", obj_name);
+                     window_occupied = true;
+                     break;
+                  }
                }
             }
             
-            if(window_free)
+            if(window_occupied)
             {
-               // This window is free - claim it
-               if(ObjectCreate(ChartID(), marker, OBJ_LABEL, w, 0, 0))
-               {
-                  ObjectSetInteger(ChartID(), marker, OBJPROP_HIDDEN, true);
-                  ObjectSetString(ChartID(), marker, OBJPROP_TEXT, g_unique_name);
-                  subwindow = w;
-                  Print("   ✅ Claimed free window: ", w, " with marker: ", marker);
-                  break;
-               }
-               else
-               {
-                  Print("   ❌ Failed to create marker in window ", w, ", error: ", GetLastError());
-               }
+               continue;  // Skip this window, try next
+            }
+            
+            if(subwindow == w)
+            {
+               break;  // Found our existing panel
+            }
+            
+            // Window is free - try to claim it with a marker
+            string marker = g_unique_name + "_marker";
+            
+            if(ObjectCreate(ChartID(), marker, OBJ_LABEL, w, 0, 0))
+            {
+               ObjectSetInteger(ChartID(), marker, OBJPROP_HIDDEN, true);
+               ObjectSetString(ChartID(), marker, OBJPROP_TEXT, g_unique_name);
+               subwindow = w;
+               Print("   ✅ Claimed free window: ", w, " with marker: ", marker);
+               break;
+            }
+            else
+            {
+               Print("   ❌ Failed to create marker in window ", w, ", error: ", GetLastError());
             }
          }
       }
@@ -375,6 +393,55 @@ void OnTimer()
       {
          // ✅ Window found! Create panel now
          string unique_prefix = StringFormat("OVORenko_%I64d_%s_", ChartID(), g_config.period_token);
+         
+         // ⚠️ CRITICAL SAFETY CHECK: Verify this window doesn't already have another instance's panel
+         // Look for ANY OVORenko panel background object in this window
+         bool window_occupied = false;
+         string existing_panel_prefix = "";
+         
+         int obj_total = ObjectsTotal(ChartID(), subwindow, -1);  // All object types
+         for(int i = 0; i < obj_total; i++)
+         {
+            string obj_name = ObjectName(ChartID(), i, subwindow, -1);
+            
+            // Check if this is an OVORenko panel object
+            if(StringFind(obj_name, "OVORenko_") == 0)  // Starts with "OVORenko_"
+            {
+               // Extract the prefix (everything before "BG", "TypeLabel", etc.)
+               int underscore_count = 0;
+               string detected_prefix = "";
+               
+               for(int c = 0; c < StringLen(obj_name); c++)
+               {
+                  if(StringGetCharacter(obj_name, c) == '_')
+                  {
+                     underscore_count++;
+                     if(underscore_count >= 3)  // After "OVORenko_<ChartID>_<Token>_"
+                     {
+                        detected_prefix = StringSubstr(obj_name, 0, c + 1);
+                        break;
+                     }
+                  }
+               }
+               
+               if(detected_prefix != "" && detected_prefix != unique_prefix)
+               {
+                  // This window has ANOTHER instance's panel!
+                  window_occupied = true;
+                  existing_panel_prefix = detected_prefix;
+                  Print("⚠️ Window ", subwindow, " already occupied by prefix: ", existing_panel_prefix);
+                  Print("   Our prefix: ", unique_prefix);
+                  break;
+               }
+            }
+         }
+         
+         if(window_occupied)
+         {
+            Print("❌ Cannot use window ", subwindow, " - already has another instance's panel");
+            Print("   Waiting for MT5 to create our dedicated window...");
+            return;  // Retry on next timer tick - wait for the NEW window to be created
+         }
          
          g_panel = new CPanelUI(ChartID(), subwindow, unique_prefix, InpVerboseLog);
          g_panel.SetChartType(InpChartType);
@@ -397,6 +464,19 @@ void OnTimer()
          if(panel_created)
          {
             Print("✅ Panel created successfully in subwindow ", subwindow);
+            
+            // ✅ Verify our objects are actually visible in the correct window
+            string bg_name = unique_prefix + "BG";
+            int bg_window = ObjectFind(ChartID(), bg_name);
+            if(bg_window == subwindow)
+            {
+               Print("✅ Verified: Panel objects in window ", subwindow);
+            }
+            else
+            {
+               Print("❌ ERROR: Panel objects not in expected window!");
+               Print("   Expected: ", subwindow, ", Found: ", bg_window);
+            }
             
             // ✅ Force a chart redraw to make objects visible
             ChartRedraw(ChartID());
