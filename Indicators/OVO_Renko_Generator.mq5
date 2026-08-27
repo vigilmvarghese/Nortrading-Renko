@@ -133,7 +133,7 @@ int OnInit()
    
    g_panel = new CPanelUI(ChartID(), subwindow, unique_prefix, InpVerboseLog);
    g_panel.SetChartType(InpChartType);
-   g_panel.SetBrickSize(DoubleToString(InpBrickSizePoints, 0));
+   g_panel.SetBrickSize(DoubleToString(InpBrickSizePoints, 0));  // ✅ Uses actual input setting
    g_panel.SetPeriodText(InpPeriodToken);
    g_panel.SetStatusText("Ready");
    g_panel.CreatePanel();
