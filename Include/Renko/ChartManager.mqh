@@ -237,6 +237,13 @@ public:
       return m_chart_id;
    }
    
+   //--- Set chart ID (used when chart is closed externally)
+   void SetChartId(long chart_id)
+   {
+      m_chart_id = chart_id;
+      m_chart_exists = (chart_id > 0);
+   }
+   
    //--- Check if chart exists
    bool ChartExists() const
    {

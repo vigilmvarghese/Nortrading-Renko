@@ -1046,10 +1046,13 @@ void PeriodicUIUpdate()
       g_chart_manager.Redraw();
       g_chart_needs_redraw = false;
    }
+   
+   // ✅ Check if generated chart is still open (every 2 seconds)
+   CheckGeneratedChart();
 }
 
 //+------------------------------------------------------------------+
-//| Check generated chart                                            |
+//| Check generated chart status (detects if closed)                 |
 //+------------------------------------------------------------------+
 void CheckGeneratedChart()
 {
@@ -1060,12 +1063,39 @@ void CheckGeneratedChart()
    
    g_last_chart_check = now;
    
-   if(g_chart_manager != NULL)
+   // ✅ CRITICAL: Check if we're in LIVE state but chart is closed
+   if(g_state == STATE_LIVE && g_chart_manager != NULL)
    {
-      g_chart_manager.EnforceM1();
+      long chart_id = g_chart_manager.GetChartId();
       
-      if(InpPreserveChartSetup)
-         g_chart_manager.PeriodicTemplateSave();
+      if(chart_id > 0)
+      {
+         // ✅ Check if the chart still exists
+         string chart_symbol = ChartSymbol(chart_id);
+         
+         if(chart_symbol == "")
+         {
+            // Chart was closed!
+            Print("⚠️ Generated chart was closed - returning to Ready state");
+            
+            g_state = STATE_PANEL_ONLY;
+            
+            if(g_panel != NULL)
+               g_panel.SetStatusText("Ready");
+            
+            // Clean up chart manager reference
+            if(g_chart_manager != NULL)
+               g_chart_manager.SetChartId(0);
+            
+            return;
+         }
+         
+         // Chart still exists - do maintenance
+         g_chart_manager.EnforceM1();
+         
+         if(InpPreserveChartSetup)
+            g_chart_manager.PeriodicTemplateSave();
+      }
    }
 }
 
