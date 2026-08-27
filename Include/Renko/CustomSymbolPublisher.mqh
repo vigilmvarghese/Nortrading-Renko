@@ -5,76 +5,75 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024, Nortrading Renko Project"
 #property link      "https://github.com/vigilmvarghese/Nortrading-Renko"
-#property version   "1.00"
+#property version   "3.00"
 #property strict
 
 #include "RenkoTypes.mqh"
 
 //+------------------------------------------------------------------+
-//| Custom Symbol Publisher                                          |
-//| Handles CustomRatesUpdate/Replace with optimization              |
+//| Custom Symbol Publisher - Exact OVO Implementation              |
+//| Reference: OVO CreateOrPrepareCustomSymbol, PublishRebuiltHistory|
 //+------------------------------------------------------------------+
 class CCustomSymbolPublisher
 {
 private:
    string            m_source_symbol;          // Source symbol
    string            m_custom_symbol;          // Custom symbol name
+   string            m_custom_folder;          // Custom symbol folder
    bool              m_symbol_created;         // Symbol creation flag
    bool              m_verbose;                // Verbose logging
    
-   MqlRates          m_history_buffer[];       // Historical rates buffer
-   int               m_history_count;          // Count of historical rates
-   
-   datetime          m_last_published_time;    // Last published bar time
+   double            m_point;                  // Point value
+   int               m_digits;                 // Digits
+   int               m_spread;                 // Spread
    
 public:
    //--- Constructor
    CCustomSymbolPublisher(bool verbose = false)
-      : m_source_symbol(""), m_custom_symbol(""), m_symbol_created(false),
-        m_verbose(verbose), m_history_count(0), m_last_published_time(0)
+      : m_source_symbol(""), m_custom_symbol(""), m_custom_folder("Renko"),
+        m_symbol_created(false), m_verbose(verbose), m_point(0), m_digits(0), m_spread(0)
    {
-      ArrayResize(m_history_buffer, 0, 10000);
    }
    
    //--- Destructor
    ~CCustomSymbolPublisher() {}
    
-   //--- Create custom symbol
-   bool CreateCustomSymbol(string source_symbol, string period_token)
+   //+------------------------------------------------------------------+
+   //| EXACT OVO CreateOrPrepareCustomSymbol() - Lines 1743-1773      |
+   //+------------------------------------------------------------------+
+   bool CreateCustomSymbol(string source_symbol, string period_token, string folder = "Renko")
    {
       m_source_symbol = source_symbol;
+      m_custom_folder = folder;
       m_custom_symbol = source_symbol + "." + period_token;
       
-      // Simple folder path - proven working approach from OVO reference
-      string custom_folder = "Renko";
+      // Get source symbol properties
+      m_point = SymbolInfoDouble(m_source_symbol, SYMBOL_POINT);
+      m_digits = (int)SymbolInfoInteger(m_source_symbol, SYMBOL_DIGITS);
+      m_spread = (int)SymbolInfoInteger(m_source_symbol, SYMBOL_SPREAD);
       
+      // Attempt to create custom symbol
       ResetLastError();
-      if(!CustomSymbolCreate(m_custom_symbol, custom_folder, m_source_symbol))
+      if(!CustomSymbolCreate(m_custom_symbol, m_custom_folder, m_source_symbol))
       {
-         int error = GetLastError();
+         int err = GetLastError();
          
          // Error 5304 means symbol already exists - this is OK, we'll reuse it
-         if(error != 5304)
+         // This is the EXACT OVO pattern
+         if(err != 5304)
          {
-            Print("ERROR: CustomSymbolCreate(", m_custom_symbol, ") failed. Error=", error);
             if(m_verbose)
-            {
-               Print("  Symbol: ", m_custom_symbol);
-               Print("  Folder: ", custom_folder);
-               Print("  Origin: ", m_source_symbol);
-               Print("  Solution: Run MT5 as Administrator OR create 'Renko' folder manually");
-            }
+               PrintFormat("ERROR: CustomSymbolCreate(%s) failed. Error=%d", m_custom_symbol, err);
             return false;
          }
          else if(m_verbose)
          {
-            // Error 5304 - symbol exists, will reuse
             Print("Custom symbol already exists (reusing): ", m_custom_symbol);
          }
       }
       else if(m_verbose)
       {
-         Print("SUCCESS: Created custom symbol ", m_custom_symbol, " in folder: ", custom_folder);
+         PrintFormat("SUCCESS: Created custom symbol %s in folder: %s", m_custom_symbol, m_custom_folder);
       }
       
       m_symbol_created = true;
@@ -82,137 +81,161 @@ public:
       // Always ensure symbol is in Market Watch
       SymbolSelect(m_custom_symbol, true);
       
-      // Set custom symbol properties
-      CustomSymbolSetInteger(m_custom_symbol, SYMBOL_DIGITS, 
-                             (int)SymbolInfoInteger(m_source_symbol, SYMBOL_DIGITS));
-      CustomSymbolSetInteger(m_custom_symbol, SYMBOL_SPREAD, 
-                             (int)SymbolInfoInteger(m_source_symbol, SYMBOL_SPREAD));
-      CustomSymbolSetDouble(m_custom_symbol, SYMBOL_POINT, 
-                            SymbolInfoDouble(m_source_symbol, SYMBOL_POINT));
-      CustomSymbolSetDouble(m_custom_symbol, SYMBOL_TRADE_TICK_SIZE, 
-                            SymbolInfoDouble(m_source_symbol, SYMBOL_TRADE_TICK_SIZE));
-      CustomSymbolSetDouble(m_custom_symbol, SYMBOL_TRADE_TICK_VALUE, 
-                            SymbolInfoDouble(m_source_symbol, SYMBOL_TRADE_TICK_VALUE));
-      CustomSymbolSetDouble(m_custom_symbol, SYMBOL_TRADE_CONTRACT_SIZE, 
-                            SymbolInfoDouble(m_source_symbol, SYMBOL_TRADE_CONTRACT_SIZE));
+      // Set custom symbol properties to match source
+      CustomSymbolSetInteger(m_custom_symbol, SYMBOL_DIGITS, m_digits);
+      CustomSymbolSetInteger(m_custom_symbol, SYMBOL_SPREAD, m_spread);
+      CustomSymbolSetDouble(m_custom_symbol, SYMBOL_POINT, m_point);
+      
+      double tick_size = SymbolInfoDouble(m_source_symbol, SYMBOL_TRADE_TICK_SIZE);
+      if(tick_size > 0.0)
+         CustomSymbolSetDouble(m_custom_symbol, SYMBOL_TRADE_TICK_SIZE, tick_size);
+      
+      double tick_value = SymbolInfoDouble(m_source_symbol, SYMBOL_TRADE_TICK_VALUE);
+      if(tick_value > 0.0)
+         CustomSymbolSetDouble(m_custom_symbol, SYMBOL_TRADE_TICK_VALUE, tick_value);
+      
+      double contract_size = SymbolInfoDouble(m_source_symbol, SYMBOL_TRADE_CONTRACT_SIZE);
+      if(contract_size > 0.0)
+         CustomSymbolSetDouble(m_custom_symbol, SYMBOL_TRADE_CONTRACT_SIZE, contract_size);
+      
+      if(m_verbose)
+         PrintFormat("Custom symbol configured: %s (digits=%d, point=%.*f, spread=%d)",
+                     m_custom_symbol, m_digits, m_digits, m_point, m_spread);
       
       return true;
    }
    
-   //--- Replace entire history
+   //+------------------------------------------------------------------+
+   //| EXACT OVO PublishRebuiltHistory() - Lines 1864-1895            |
+   //| Atomic replacement using CustomRatesReplace                     |
+   //+------------------------------------------------------------------+
    bool ReplaceHistory(const RenkoBrick &bricks[], int count)
    {
       if(!m_symbol_created || count <= 0)
          return false;
       
       // Convert bricks to MqlRates
-      ArrayResize(m_history_buffer, count);
+      MqlRates rates[];
+      ArrayResize(rates, count);
+      
       for(int i = 0; i < count; i++)
       {
-         bricks[i].ToMqlRates(m_history_buffer[i]);
+         rates[i].time = bricks[i].time;
+         rates[i].open = bricks[i].open;
+         rates[i].high = bricks[i].high;
+         rates[i].low = bricks[i].low;
+         rates[i].close = bricks[i].close;
+         rates[i].tick_volume = bricks[i].tick_volume;
+         rates[i].spread = bricks[i].spread;
+         rates[i].real_volume = bricks[i].real_volume;
       }
       
-      m_history_count = count;
+      // ✅ CRITICAL OVO PATTERN: Atomic replacement using CustomRatesReplace
+      // This works while the custom-symbol chart is open and removes stale
+      // candles that belonged to the previous brick size
+      ResetLastError();
+      int written = CustomRatesReplace(m_custom_symbol,
+                                       D'1970.01.01 00:00',
+                                       D'2099.12.31 23:59',
+                                       rates);
       
-      // Clear existing history
-      datetime from = m_history_buffer[0].time;
-      datetime to = m_history_buffer[count - 1].time + PeriodSeconds(PERIOD_D1);
-      
-      if(!CustomRatesDelete(m_custom_symbol, from, to))
+      if(written < 0)
       {
          if(m_verbose)
-            Print("Warning: CustomRatesDelete returned false");
-      }
-      
-      // Replace history
-      int replace_result = CustomRatesReplace(m_custom_symbol, from, to, m_history_buffer);
-      if(replace_result <= 0)
-      {
-         Print("ERROR: CustomRatesReplace failed. Error: ", GetLastError());
+            PrintFormat("ERROR: CustomRatesReplace failed. Error=%d", GetLastError());
          return false;
       }
       
-      if(count > 0)
-         m_last_published_time = m_history_buffer[count - 1].time;
-      
       if(m_verbose)
-         Print("Replaced history: ", count, " bars from ", 
-               TimeToString(from), " to ", TimeToString(to));
+         PrintFormat("Atomic history replacement complete. rates=%d", written);
       
       return true;
    }
    
-   //--- Update with completed bricks and forming brick
+   //+------------------------------------------------------------------+
+   //| Update with completed bricks and forming brick (live updates)  |
+   //| Reference: OVO PublishTail() - Lines 1913-1948                 |
+   //+------------------------------------------------------------------+
    bool UpdateRates(const RenkoBrick &completed_bricks[], int completed_count,
-                    const RenkoBrick &forming_brick, ENUM_DIRTY_STATE dirty_state)
+                    const RenkoBrick &forming_brick)
    {
       if(!m_symbol_created)
          return false;
       
-      if(dirty_state == DIRTY_NONE)
-         return true;
-      
-      // Build update buffer
-      MqlRates update_rates[];
-      int update_count = completed_count + 1;  // completed + forming
-      ArrayResize(update_rates, update_count);
+      // Build update buffer: completed + forming
+      int total = completed_count + 1;
+      MqlRates rates[];
+      ArrayResize(rates, total);
       
       // Add completed bricks
       for(int i = 0; i < completed_count; i++)
       {
-         completed_bricks[i].ToMqlRates(update_rates[i]);
+         rates[i].time = completed_bricks[i].time;
+         rates[i].open = completed_bricks[i].open;
+         rates[i].high = completed_bricks[i].high;
+         rates[i].low = completed_bricks[i].low;
+         rates[i].close = completed_bricks[i].close;
+         rates[i].tick_volume = completed_bricks[i].tick_volume;
+         rates[i].spread = completed_bricks[i].spread;
+         rates[i].real_volume = completed_bricks[i].real_volume;
       }
       
       // Add forming brick
-      forming_brick.ToMqlRates(update_rates[completed_count]);
+      rates[completed_count].time = forming_brick.time;
+      rates[completed_count].open = forming_brick.open;
+      rates[completed_count].high = forming_brick.high;
+      rates[completed_count].low = forming_brick.low;
+      rates[completed_count].close = forming_brick.close;
+      rates[completed_count].tick_volume = forming_brick.tick_volume;
+      rates[completed_count].spread = forming_brick.spread;
+      rates[completed_count].real_volume = forming_brick.real_volume;
       
       // Update custom symbol
-      int update_result = CustomRatesUpdate(m_custom_symbol, update_rates);
-      if(update_result <= 0)
+      ResetLastError();
+      int written = CustomRatesUpdate(m_custom_symbol, rates, WHOLE_ARRAY);
+      
+      if(written < 0)
       {
-         int error = GetLastError();
          if(m_verbose)
-            Print("CustomRatesUpdate failed. Error: ", error);
-         
-         // Fallback: try replace
-         if(update_count > 0)
-         {
-            datetime from = update_rates[0].time;
-            datetime to = update_rates[update_count - 1].time + 60;
-            int replace_result = CustomRatesReplace(m_custom_symbol, from, to, update_rates);
-            return (replace_result > 0);
-         }
-         
+            PrintFormat("CustomRatesUpdate failed. Error=%d", GetLastError());
          return false;
       }
       
-      // Update last published time
-      if(update_count > 0)
-         m_last_published_time = update_rates[update_count - 1].time;
-      
       if(m_verbose && completed_count > 0)
-         Print("Updated rates: ", completed_count, " completed + 1 forming");
+         PrintFormat("Updated rates: %d completed + 1 forming", completed_count);
       
       return true;
    }
    
-   //--- Update only forming brick (no new completed bricks)
+   //+------------------------------------------------------------------+
+   //| Update only forming brick (no new completed bricks)            |
+   //| Reference: OVO PublishAll() pattern                             |
+   //+------------------------------------------------------------------+
    bool UpdateFormingOnly(const RenkoBrick &forming_brick)
    {
       if(!m_symbol_created)
          return false;
       
       MqlRates rate;
-      forming_brick.ToMqlRates(rate);
+      rate.time = forming_brick.time;
+      rate.open = forming_brick.open;
+      rate.high = forming_brick.high;
+      rate.low = forming_brick.low;
+      rate.close = forming_brick.close;
+      rate.tick_volume = forming_brick.tick_volume;
+      rate.spread = forming_brick.spread;
+      rate.real_volume = forming_brick.real_volume;
       
-      MqlRates update_rates[1];
-      update_rates[0] = rate;
+      MqlRates rates[1];
+      rates[0] = rate;
       
-      int update_result = CustomRatesUpdate(m_custom_symbol, update_rates);
-      if(update_result <= 0)
+      ResetLastError();
+      int written = CustomRatesUpdate(m_custom_symbol, rates, WHOLE_ARRAY);
+      
+      if(written < 0)
       {
          if(m_verbose)
-            Print("UpdateFormingOnly failed. Error: ", GetLastError());
+            PrintFormat("UpdateFormingOnly failed. Error=%d", GetLastError());
          return false;
       }
       
@@ -225,13 +248,15 @@ public:
       if(!m_symbol_created)
          return true;
       
+      ResetLastError();
       if(!CustomSymbolDelete(m_custom_symbol))
       {
          int error = GetLastError();
          if(error != 0)
          {
-            Print("WARNING: Failed to delete custom symbol ", m_custom_symbol, 
-                  " Error: ", error);
+            if(m_verbose)
+               PrintFormat("WARNING: Failed to delete custom symbol %s. Error=%d",
+                           m_custom_symbol, error);
             return false;
          }
       }
@@ -256,21 +281,12 @@ public:
       return m_symbol_created;
    }
    
-   //--- Get history count
-   int GetHistoryCount() const
-   {
-      return m_history_count;
-   }
-   
    //--- Reset
    void Reset()
    {
       m_source_symbol = "";
       m_custom_symbol = "";
       m_symbol_created = false;
-      m_history_count = 0;
-      m_last_published_time = 0;
-      ArrayResize(m_history_buffer, 0);
    }
 };
 

@@ -5,9 +5,9 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024, Nortrading Renko Project"
 #property link      "https://github.com/vigilmvarghese/Nortrading-Renko"
-#property version   "1.00"
-#property description "MT5 OVO-Style Renko Generator"
-#property description "Generates true custom symbol Renko charts"
+#property version   "3.00"
+#property description "MT5 OVO-Style Renko Generator - Exact OVO Implementation"
+#property description "Synchronous history build, instant completion"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots   0
@@ -30,7 +30,7 @@ input group "=== RENKO ENGINE ==="
 input ENUM_RENKO_TYPE InpChartType = RENKO_MEAN;          // Chart Type
 input double InpBrickSizePoints = 600;                     // Brick / Step Points
 input bool InpSuppressWicks = false;                       // Suppress Candle Wicks
-input int InpInitialHistoryCandles = 1000;                 // Initial History Candles
+input bool InpRelocateOpen = true;                         // Relocate Reversal Open (gap style)
 
 input group "=== CUSTOM CHART ==="
 input string InpPeriodToken = "M61";                       // Custom Period ID (M61, M2, etc)
@@ -40,8 +40,8 @@ input group "=== LIVE FEED ==="
 input int InpLivePumpMs = 20;                              // Live Pump Milliseconds (min 5)
 
 input group "=== PERFORMANCE ==="
-input int InpRebuildBudgetMs = 8;                          // Historical Rebuild Budget (ms)
 input bool InpEnableTickCache = true;                      // Enable Tick Cache
+input int InpTickChunkMinutes = 180;                       // Tick load chunk size (minutes)
 
 input group "=== PERSISTENCE ==="
 input bool InpAutoResume = true;                           // Auto Resume After MT5 Restart
@@ -53,7 +53,7 @@ input bool InpShowEntrySlTp = true;                        // Show Entry / SL / 
 input bool InpShowMonetaryLabels = true;                   // Show Monetary SL/TP Labels
 
 input group "=== DIAGNOSTICS ==="
-input bool InpVerboseLog = false;                          // Verbose Log
+input bool InpVerboseLog = true;                           // Verbose Log
 input bool InpMeanRenkoDiagnostics = false;                // Mean Renko Diagnostics
 
 //+------------------------------------------------------------------+
@@ -78,72 +78,62 @@ int g_live_pump_timer = 0;
 datetime g_last_ui_update = 0;
 datetime g_last_trade_update = 0;
 datetime g_last_chart_check = 0;
+ulong g_last_tick_msc = 0;
 
 // Runtime state
 double g_runtime_brick_size = 0;
 bool g_rebuild_requested = false;
 bool g_chart_needs_redraw = false;
-bool g_explicit_button_click = false;  // Track if user explicitly clicked button
+bool g_explicit_button_click = false;
 
 //+------------------------------------------------------------------+
 //| Custom indicator initialization                                  |
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   Print("=== OVO Renko Generator Initializing ===");
+   Print("=== OVO Renko Generator V3.0 Initializing ===");
    
-   // Validate inputs
    if(!ValidateInputs())
       return INIT_PARAMETERS_INCORRECT;
    
-   // Initialize configuration
    InitializeConfig();
    
-   // Initialize persistence
    g_persistence.source_symbol = _Symbol;
    g_persistence.period_token = InpPeriodToken;
    g_persistence.chart_type = InpChartType;
    g_persistence.brick_size = InpBrickSizePoints;
    
-   // Try to load persistence state
    if(InpAutoResume)
    {
       if(g_persistence.Load())
-      {
          Print("Loaded persistence state - will auto-resume");
-      }
    }
    
-   // Create components
    CreateComponents();
    
-   // Create panel
    g_state = STATE_PANEL_ONLY;
    g_panel = new CPanelUI(ChartID(), 0, "OVORenko_", InpVerboseLog);
    g_panel.SetChartType(InpChartType);
    g_panel.SetBrickSize(DoubleToString(InpBrickSizePoints, 0));
    g_panel.SetPeriodText(InpPeriodToken);
-   g_panel.SetStatusText("OVO C2");
+   g_panel.SetStatusText("Ready");
    g_panel.CreatePanel();
    
-   // Set up timer
    int timer_ms = MathMax(InpLivePumpMs, 5);
    EventSetMillisecondTimer(timer_ms);
    g_live_pump_timer = timer_ms;
    
    Print("Indicator initialized successfully");
-   Print("State: PANEL_ONLY");
    Print("Click period button (", InpPeriodToken, ") to generate Renko chart");
    
-   // Auto-resume if enabled
    if(InpAutoResume && g_persistence.is_active)
    {
       Print("Auto-resuming previous session...");
-      g_explicit_button_click = false;  // Auto-resume doesn't switch charts
+      g_explicit_button_click = false;
       g_rebuild_requested = true;
    }
    
-   return(INIT_SUCCEEDED);
+   return INIT_SUCCEEDED;
 }
 
 //+------------------------------------------------------------------+
@@ -154,8 +144,7 @@ void OnDeinit(const int reason)
    Print("=== OVO Renko Generator Deinitializing ===");
    Print("Reason: ", GetDeinitReasonText(reason));
    
-   // Save persistence state
-   if(g_state == STATE_LIVE || g_state == STATE_REBUILDING)
+   if(g_state == STATE_LIVE)
    {
       g_persistence.is_active = true;
       g_persistence.Save();
@@ -163,19 +152,14 @@ void OnDeinit(const int reason)
    }
    else if(reason == REASON_REMOVE)
    {
-      // User explicitly removed indicator
       g_persistence.is_active = false;
       g_persistence.Save();
       Print("Indicator removed - auto-resume disabled");
    }
    
-   // Kill timer
    EventKillTimer();
-   
-   // Clean up components
    DestroyComponents();
    
-   // Delete panel
    if(g_panel != NULL)
    {
       delete g_panel;
@@ -199,22 +183,17 @@ int OnCalculate(const int rates_total,
                 const long &volume[],
                 const int &spread[])
 {
-   // OnCalculate performs only lightweight duties
-   // All heavy work is in OnTimer
-   
-   return(rates_total);
+   return rates_total;
 }
 
 //+------------------------------------------------------------------+
-//| Timer event                                                      |
+//| Timer event - OVO pattern: synchronous build + live pump        |
 //+------------------------------------------------------------------+
 void OnTimer()
 {
-   // Handle different states
    switch(g_state)
    {
       case STATE_INITIALIZING:
-         // Should not reach here
          break;
       
       case STATE_PANEL_ONLY:
@@ -222,15 +201,8 @@ void OnTimer()
          break;
       
       case STATE_REBUILD_REQUESTED:
+         // ✅ SYNCHRONOUS BUILD - completes immediately
          StartRebuild();
-         break;
-      
-      case STATE_REBUILDING:
-         ContinueRebuild();
-         break;
-      
-      case STATE_PUBLISHING:
-         CompletePublish();
          break;
       
       case STATE_LIVE:
@@ -238,11 +210,9 @@ void OnTimer()
          break;
       
       case STATE_STOPPING:
-         // Cleanup state
          break;
    }
    
-   // Periodic UI maintenance (slower than live pump)
    PeriodicUIUpdate();
 }
 
@@ -254,22 +224,15 @@ void OnChartEvent(const int id,
                   const double &dparam,
                   const string &sparam)
 {
-   // Handle button clicks
    if(id == CHARTEVENT_OBJECT_CLICK)
    {
       if(g_panel != NULL)
       {
-         // Period button clicked
          if(g_panel.IsPeriodButtonClicked())
-         {
             OnPeriodButtonClick();
-         }
          
-         // Close button clicked
          if(g_panel.IsCloseButtonClicked())
-         {
             OnCloseButtonClick();
-         }
       }
    }
 }
@@ -308,11 +271,9 @@ void InitializeConfig()
    g_config.chart_type = InpChartType;
    g_config.brick_size_points = InpBrickSizePoints;
    g_config.suppress_wicks = InpSuppressWicks;
-   g_config.initial_history_candles = InpInitialHistoryCandles;
    g_config.period_token = InpPeriodToken;
    g_config.history_days = InpHistoryDays;
    g_config.live_pump_ms = InpLivePumpMs;
-   g_config.rebuild_budget_ms = InpRebuildBudgetMs;
    g_config.enable_tick_cache = InpEnableTickCache;
    g_config.auto_resume = InpAutoResume;
    g_config.preserve_chart_setup = InpPreserveChartSetup;
@@ -341,7 +302,6 @@ void CreateComponents()
    
    g_publisher = new CCustomSymbolPublisher(InpVerboseLog);
    g_builder = new CHistoricalBuilder(_Symbol, InpVerboseLog);
-   g_builder.SetBudgetMs(InpRebuildBudgetMs);
    g_builder.EnableCache(InpEnableTickCache);
    
    g_chart_manager = new CChartManager(InpVerboseLog);
@@ -400,23 +360,22 @@ void DestroyComponents()
 //+------------------------------------------------------------------+
 void HandlePanelOnly()
 {
-   // Just maintain panel
    if(g_panel != NULL)
       g_panel.UpdateWidth();
    
-   // Check for rebuild request
    if(g_rebuild_requested)
-   {
       g_state = STATE_REBUILD_REQUESTED;
-   }
 }
 
 //+------------------------------------------------------------------+
-//| Start rebuild process                                            |
+//| SYNCHRONOUS Start rebuild - OVO pattern (instant completion)    |
+//| Reference: OVO BuildHistoricalModel() - no async                |
 //+------------------------------------------------------------------+
 void StartRebuild()
 {
-   Print("=== Starting Rebuild ===");
+   Print("=== Starting SYNCHRONOUS Rebuild ===");
+   
+   g_rebuild_requested = false;
    
    // Get runtime brick size from panel
    if(g_panel != NULL)
@@ -428,12 +387,13 @@ void StartRebuild()
    }
    
    Print("Brick size: ", g_runtime_brick_size);
+   Print("Chart type: ", (g_config.chart_type == RENKO_MEAN ? "Mean Renko" : "Regular Renko"));
    
    // Reset engines
    if(g_config.chart_type == RENKO_REGULAR)
    {
       g_regular_engine.Reset();
-      g_regular_engine.Configure(g_runtime_brick_size, g_config.suppress_wicks);
+      g_regular_engine.Configure(g_runtime_brick_size, g_config.suppress_wicks, InpRelocateOpen);
    }
    else
    {
@@ -447,71 +407,36 @@ void StartRebuild()
       Print("ERROR: Failed to create custom symbol");
       g_state = STATE_PANEL_ONLY;
       if(g_panel != NULL)
-         g_panel.SetStatusText("ERROR: Symbol creation failed");
+         g_panel.SetStatusText("ERROR: Symbol failed");
       return;
    }
    
-   // Start asynchronous build
-   if(!g_builder.StartBuild(g_config.chart_type, g_runtime_brick_size,
-                            g_config.suppress_wicks, g_config.history_days))
+   // ✅ SYNCHRONOUS BUILD - Completes instantly (no async passes)
+   if(g_panel != NULL)
+      g_panel.SetStatusText("Building...");
+   
+   bool build_ok = g_builder.BuildHistory(g_config.chart_type,
+                                           g_runtime_brick_size,
+                                           g_config.suppress_wicks,
+                                           g_config.history_days,
+                                           InpRelocateOpen);
+   
+   if(!build_ok)
    {
-      Print("ERROR: Failed to start historical build");
+      Print("ERROR: Historical build failed");
       g_state = STATE_PANEL_ONLY;
       if(g_panel != NULL)
          g_panel.SetStatusText("ERROR: Build failed");
       return;
    }
    
-   g_state = STATE_REBUILDING;
-   if(g_panel != NULL)
-      g_panel.SetStatusText("Rebuilding...");
-   
-   Print("Historical build started");
-}
-
-//+------------------------------------------------------------------+
-//| Continue asynchronous rebuild                                    |
-//+------------------------------------------------------------------+
-void ContinueRebuild()
-{
-   if(g_builder == NULL)
-      return;
-   
-   // Process one pass
-   bool more_work = g_builder.ProcessBuildPass(g_config.chart_type, g_runtime_brick_size,
-                                                 g_config.suppress_wicks);
-   
-   // Update progress
-   BuildProgress progress = g_builder.GetProgress();
-   int percent = progress.GetProgressPercent();
-   
-   if(g_panel != NULL)
-   {
-      g_panel.SetStatusText("Rebuilding " + IntegerToString(percent) + "%");
-   }
-   
-   // Check if finished
-   if(!more_work)
-   {
-      Print("Historical build completed");
-      g_state = STATE_PUBLISHING;
-   }
-}
-
-//+------------------------------------------------------------------+
-//| Complete publish to custom symbol                                |
-//+------------------------------------------------------------------+
-void CompletePublish()
-{
-   Print("=== Publishing History ===");
-   
-   // Get build results
+   // Get results
    RenkoBrick results[];
    int count = g_builder.GetResults(results);
    
-   Print("Publishing ", count, " bricks");
+   Print("Publishing ", count, " bricks (history complete instantly)");
    
-   // Replace history
+   // Publish to custom symbol
    if(!g_publisher.ReplaceHistory(results, count))
    {
       Print("ERROR: Failed to publish history");
@@ -521,7 +446,7 @@ void CompletePublish()
       return;
    }
    
-   // Open/switch to chart (only if explicit button click)
+   // Open/switch to chart
    string custom_symbol = g_publisher.GetCustomSymbolName();
    long chart_id = g_chart_manager.OpenChart(custom_symbol, g_explicit_button_click);
    
@@ -530,14 +455,13 @@ void CompletePublish()
       Print("ERROR: Failed to open chart");
       g_state = STATE_PANEL_ONLY;
       if(g_panel != NULL)
-         g_panel.SetStatusText("ERROR: Chart open failed");
+         g_panel.SetStatusText("ERROR: Chart failed");
       return;
    }
    
-   // Reset button click flag after opening
    g_explicit_button_click = false;
    
-   // Create trade overlay for Renko chart
+   // Create trade overlay
    g_trade_overlay = new CTradeOverlay(_Symbol, chart_id, "OVOTrade_", InpVerboseLog);
    g_trade_overlay.Configure(InpShowSourceBidAsk, InpShowEntrySlTp, InpShowMonetaryLabels);
    
@@ -565,24 +489,27 @@ void CompletePublish()
          g_mean_engine.Initialize(init_price, init_time);
    }
    
+   g_last_tick_msc = 0;
    g_state = STATE_LIVE;
+   
    if(g_panel != NULL)
       g_panel.SetStatusText("LIVE");
    
-   Print("=== Live Processing Started ===");
+   Print("=== Build Complete - Now LIVE (history built instantly) ===");
+   Print("Total bricks: ", count);
 }
 
 //+------------------------------------------------------------------+
-//| Process live ticks                                               |
+//| Process live ticks (OVO PumpLiveGeneratorTicks pattern)         |
 //+------------------------------------------------------------------+
 void ProcessLiveTicks()
 {
    if(g_tick_integrity == NULL)
       return;
    
-   // FAST PATH: Check if there's a new tick
+   // Fast path: check if there's a new tick
    if(!g_tick_integrity.HasNewTick())
-      return;  // No new tick - immediate return
+      return;
    
    // Get new ticks
    MqlTick new_ticks[];
@@ -608,7 +535,6 @@ void ProcessLiveTicks()
             dirty_state = g_mean_engine.ProcessTick(price, new_ticks[i].time);
       }
       
-      // Mark processed
       g_tick_integrity.MarkProcessed(new_ticks[i]);
    }
    
@@ -628,31 +554,27 @@ void ProcessLiveTicks()
    else
       forming = g_mean_engine.GetFormingBrick();
    
-   // Publish to custom symbol based on dirty state
+   // Publish based on dirty state
    if(dirty_state == DIRTY_FORMING_CHANGED)
    {
-      // Only forming changed
       g_publisher.UpdateFormingOnly(forming);
    }
    else if(dirty_state == DIRTY_BRICK_COMPLETED || dirty_state == DIRTY_MULTI_BRICK_COMPLETED)
    {
-      // Bricks completed
-      g_publisher.UpdateRates(completed, completed_count, forming, dirty_state);
+      g_publisher.UpdateRates(completed, completed_count, forming);
       g_chart_needs_redraw = true;
    }
    
-   // Periodic chart check
    CheckGeneratedChart();
 }
 
 //+------------------------------------------------------------------+
-//| Periodic UI update (slower than live pump)                       |
+//| Periodic UI update                                               |
 //+------------------------------------------------------------------+
 void PeriodicUIUpdate()
 {
    datetime now = TimeCurrent();
    
-   // Update panel width every 500ms
    if(now != g_last_ui_update || (GetTickCount() % 500) == 0)
    {
       if(g_panel != NULL)
@@ -661,7 +583,6 @@ void PeriodicUIUpdate()
       g_last_ui_update = now;
    }
    
-   // Update trade overlay every 1 second
    if(g_state == STATE_LIVE && g_trade_overlay != NULL)
    {
       if(now - g_last_trade_update >= 1)
@@ -671,7 +592,6 @@ void PeriodicUIUpdate()
       }
    }
    
-   // Redraw chart if needed
    if(g_chart_needs_redraw && g_chart_manager != NULL)
    {
       g_chart_manager.Redraw();
@@ -693,10 +613,8 @@ void CheckGeneratedChart()
    
    if(g_chart_manager != NULL)
    {
-      // Enforce M1 timeframe
       g_chart_manager.EnforceM1();
       
-      // Periodic template save
       if(InpPreserveChartSetup)
          g_chart_manager.PeriodicTemplateSave();
    }
@@ -711,7 +629,7 @@ void OnPeriodButtonClick()
    
    if(g_state == STATE_PANEL_ONLY || g_state == STATE_LIVE)
    {
-      g_explicit_button_click = true;  // Mark as explicit user action
+      g_explicit_button_click = true;
       g_rebuild_requested = true;
       g_state = STATE_REBUILD_REQUESTED;
    }
@@ -724,11 +642,9 @@ void OnCloseButtonClick()
 {
    Print("Close button clicked - removing indicator");
    
-   // Disable auto-resume
    g_persistence.is_active = false;
    g_persistence.Save();
    
-   // Remove from chart
    ChartIndicatorDelete(ChartID(), 0, "OVO_Renko_Generator");
 }
 

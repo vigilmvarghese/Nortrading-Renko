@@ -5,61 +5,68 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024, Nortrading Renko Project"
 #property link      "https://github.com/vigilmvarghese/Nortrading-Renko"
-#property version   "2.00"
+#property version   "3.00"
 #property strict
 
 #include "RenkoTypes.mqh"
 
 //+------------------------------------------------------------------+
-//| Regular Renko Engine - OVO-calibrated implementation            |
-//| Based on proven OVO_Style_Omnia_MT5 reference logic             |
+//| Regular Renko Engine - Exact OVO Implementation                 |
+//| Based on OVO_Style_Omnia_MT5.mq5 ProcessPrice() logic           |
 //+------------------------------------------------------------------+
 class CRegularRenkoEngine
 {
 private:
    string            m_symbol;                 // Symbol
    double            m_point;                  // Point value
+   double            m_tick_size;              // Tick size
    int               m_digits;                 // Price digits
    
    double            m_brick_size_points;      // Brick size in points
-   double            m_brick_size_price;       // Brick size in price (g_box)
+   double            m_box;                    // Brick size in price (g_box)
    bool              m_suppress_wicks;         // Suppress wicks flag
+   bool              m_relocate_open;          // Relocate reversal open
    bool              m_verbose;                // Verbose logging
    
    RenkoBrick        m_completed_bricks[];     // Buffer for completed bricks
    int               m_completed_count;        // Count of completed bricks
    
-   // OVO-style state
-   bool              m_seeded;                 // Engine seeded
-   double            m_last_close;             // Last completed brick close
-   int               m_last_dir;               // Last direction: +1 up, -1 down, 0 none
-   double            m_pending_high;           // Forming brick high extreme
-   double            m_pending_low;            // Forming brick low extreme
-   double            m_last_price;             // Last tick price
-   ulong             m_tick_volume;            // Forming brick tick volume
+   // OVO-style state variables (exact match to reference)
+   bool              m_seeded;                 // g_seeded
+   double            m_last_close;             // g_last_close
+   int               m_last_dir;               // g_last_dir: +1 up, -1 down, 0 none
+   double            m_pending_high;           // g_pending_high
+   double            m_pending_low;            // g_pending_low
+   double            m_last_price;             // g_last_price
+   ulong             m_tick_volume;            // g_tick_volume
    
-   datetime          m_next_bar_time;          // Next brick timestamp
-   long              m_brick_serial;           // Brick sequence counter
+   datetime          m_next_bar_time;          // g_next_bar_time
+   long              m_brick_serial;           // g_brick_serial
    
-   double            m_prev_body_open;         // Previous brick open (for Mean Renko compat)
-   double            m_prev_body_close;        // Previous brick close (for Mean Renko compat)
+   double            m_prev_body_open;         // g_prev_body_open
+   double            m_prev_body_close;        // g_prev_body_close
    
 public:
    //--- Constructor
    CRegularRenkoEngine(string symbol = "", bool verbose = false)
       : m_symbol(symbol), m_brick_size_points(600), m_suppress_wicks(false),
-        m_verbose(verbose), m_completed_count(0), m_seeded(false),
-        m_last_close(0), m_last_dir(0), m_pending_high(0), m_pending_low(0),
-        m_last_price(0), m_tick_volume(0), m_brick_serial(0),
-        m_next_bar_time(D'2000.01.01 00:00'), m_prev_body_open(0), m_prev_body_close(0)
+        m_relocate_open(true), m_verbose(verbose), m_completed_count(0),
+        m_seeded(false), m_last_close(0), m_last_dir(0), 
+        m_pending_high(0), m_pending_low(0), m_last_price(0), m_tick_volume(0),
+        m_brick_serial(0), m_next_bar_time(D'2000.01.01 00:00'),
+        m_prev_body_open(0), m_prev_body_close(0)
    {
       if(m_symbol == "")
          m_symbol = _Symbol;
       
       m_point = SymbolInfoDouble(m_symbol, SYMBOL_POINT);
+      m_tick_size = SymbolInfoDouble(m_symbol, SYMBOL_TRADE_TICK_SIZE);
       m_digits = (int)SymbolInfoInteger(m_symbol, SYMBOL_DIGITS);
       
-      m_brick_size_price = m_brick_size_points * m_point;
+      if(m_tick_size <= 0.0)
+         m_tick_size = m_point;
+      
+      m_box = m_brick_size_points * m_point;
       
       ArrayResize(m_completed_bricks, 0, 1000);
    }
@@ -68,18 +75,20 @@ public:
    ~CRegularRenkoEngine() {}
    
    //--- Configure engine
-   void Configure(double brick_size_points, bool suppress_wicks)
+   void Configure(double brick_size_points, bool suppress_wicks, bool relocate_open = true)
    {
       m_brick_size_points = brick_size_points;
-      m_brick_size_price = brick_size_points * m_point;
+      m_box = NormalizeToTick(brick_size_points * m_point);
       m_suppress_wicks = suppress_wicks;
+      m_relocate_open = relocate_open;
       
       if(m_verbose)
-         Print("RegularRenko configured: brick_size=", brick_size_points, 
-               " suppress_wicks=", suppress_wicks);
+         Print("RegularRenko configured: brick=", brick_size_points, 
+               " suppress_wicks=", suppress_wicks,
+               " relocate_open=", relocate_open);
    }
    
-   //--- Initialize with first price
+   //--- Initialize with first price (OVO SeedEngine)
    bool Initialize(double initial_price, datetime initial_time)
    {
       if(initial_price <= 0)
@@ -107,24 +116,24 @@ public:
       return true;
    }
    
-   //--- Process incoming tick - OVO-style multi-brick logic
-   ENUM_DIRTY_STATE ProcessTick(double price, datetime tick_time)
+   //+------------------------------------------------------------------+
+   //| EXACT OVO ProcessPrice() - Multi-brick processing               |
+   //| Reference: OVO_Style_Omnia_MT5.mq5 lines 1520-1603             |
+   //+------------------------------------------------------------------+
+   ENUM_DIRTY_STATE ProcessTick(double raw_price, datetime tick_time)
    {
+      if(raw_price <= 0.0 || m_box <= 0.0)
+         return DIRTY_NONE;
+      
+      const double price = NormalizeToTick(raw_price);
+      
       if(!m_seeded)
       {
          Initialize(price, tick_time);
          return DIRTY_FORMING_CHANGED;
       }
       
-      if(price <= 0.0 || m_brick_size_price <= 0.0)
-         return DIRTY_NONE;
-      
-      price = NormalizeDouble(price, m_digits);
-      
-      m_completed_count = 0;
-      ArrayResize(m_completed_bricks, 0);
-      
-      // Save excursion BEFORE this tick - belongs to first brick only
+      // Save excursion that existed BEFORE the present tick
       const double prior_high = m_pending_high;
       const double prior_low = m_pending_low;
       const ulong prior_vol = MathMax(m_tick_volume, (ulong)1);
@@ -132,10 +141,13 @@ public:
       m_last_price = price;
       m_tick_volume++;
       
+      m_completed_count = 0;
+      ArrayResize(m_completed_bricks, 0);
+      
       int made = 0;
       bool first_emitted = true;
       
-      // Guard against infinite loops
+      // Guard against malformed quotes / accidental infinite loops
       for(int guard = 0; guard < 10000; guard++)
       {
          bool emitted = false;
@@ -143,7 +155,7 @@ public:
          if(m_last_dir == 0)
          {
             // No direction yet - check both ways
-            if(price >= m_last_close + m_brick_size_price)
+            if(price >= m_last_close + m_box)
             {
                CompleteUpBrick(false,
                               first_emitted ? prior_high : m_last_close,
@@ -151,7 +163,7 @@ public:
                               prior_vol);
                emitted = true;
             }
-            else if(price <= m_last_close - m_brick_size_price)
+            else if(price <= m_last_close - m_box)
             {
                CompleteDownBrick(false,
                                 first_emitted ? prior_high : m_last_close,
@@ -163,7 +175,7 @@ public:
          else if(m_last_dir > 0)
          {
             // Bullish - continuation or reversal
-            if(price >= m_last_close + m_brick_size_price)
+            if(price >= m_last_close + m_box)
             {
                CompleteUpBrick(false,
                               first_emitted ? prior_high : m_last_close,
@@ -171,7 +183,7 @@ public:
                               prior_vol);
                emitted = true;
             }
-            else if(price <= m_last_close - 2.0 * m_brick_size_price)
+            else if(price <= m_last_close - 2.0 * m_box)
             {
                CompleteUpBrick(true,  // Reversal
                               first_emitted ? prior_high : m_last_close,
@@ -183,7 +195,7 @@ public:
          else  // m_last_dir < 0
          {
             // Bearish - continuation or reversal
-            if(price <= m_last_close - m_brick_size_price)
+            if(price <= m_last_close - m_box)
             {
                CompleteDownBrick(false,
                                 first_emitted ? prior_high : m_last_close,
@@ -191,7 +203,7 @@ public:
                                 prior_vol);
                emitted = true;
             }
-            else if(price >= m_last_close + 2.0 * m_brick_size_price)
+            else if(price >= m_last_close + 2.0 * m_box)
             {
                CompleteDownBrick(true,  // Reversal
                                 first_emitted ? prior_high : m_last_close,
@@ -208,16 +220,15 @@ public:
          first_emitted = false;
       }
       
+      // Excursion state belongs to the CURRENT unfinished Renko decision
       if(made > 0)
       {
-         // After completing bricks, reset excursion to last_close + current price
          m_pending_high = MathMax(m_last_close, price);
          m_pending_low = MathMin(m_last_close, price);
          m_tick_volume = 1;
       }
       else
       {
-         // No bricks completed - update forming brick extremes
          m_pending_high = MathMax(m_pending_high, price);
          m_pending_low = MathMin(m_pending_low, price);
       }
@@ -231,7 +242,9 @@ public:
          return DIRTY_FORMING_CHANGED;
    }
    
-   //--- Complete bullish brick (OVO logic)
+   //+------------------------------------------------------------------+
+   //| EXACT OVO CompleteUpBrick() - Reference lines 337-377          |
+   //+------------------------------------------------------------------+
    void CompleteUpBrick(const bool reversal,
                         const double prior_high,
                         const double prior_low,
@@ -241,36 +254,45 @@ public:
       
       if(reversal)
       {
-         // Classic Renko: reversal down from uptrend
-         // With relocation: open 1 box below previous close, close 2 boxes below
-         o = m_last_close - m_brick_size_price;
-         c = m_last_close - 2.0 * m_brick_size_price;
-      }
-      else
-      {
-         // Continuation: open at last close, close 1 box up
-         o = m_last_close;
-         c = m_last_close + m_brick_size_price;
+         // Classic Renko reversal with relocation
+         if(m_relocate_open)
+         {
+            o = m_last_close - m_box;
+            c = m_last_close - 2.0 * m_box;
+         }
+         else
+         {
+            // No-gap visual form
+            o = m_last_close;
+            c = m_last_close - 2.0 * m_box;
+         }
+         
+         double hi = MathMax(o, c);
+         double lo = MathMin(o, c);
+         
+         if(!m_suppress_wicks)
+            hi = MathMax(hi, prior_high);
+         
+         AppendCompleted(o, c, hi, lo, -1, volume);
+         return;
       }
       
-      o = NormalizeDouble(o, m_digits);
-      c = NormalizeDouble(c, m_digits);
+      // Continuation
+      o = m_last_close;
+      c = m_last_close + m_box;
       
       double hi = MathMax(o, c);
       double lo = MathMin(o, c);
       
       if(!m_suppress_wicks)
-      {
-         if(reversal)
-            lo = MathMin(lo, prior_low);  // Down brick can have low wick
-         else
-            lo = MathMin(lo, prior_low);  // Up brick can have low wick
-      }
+         lo = MathMin(lo, prior_low);
       
-      AppendCompleted(o, c, hi, lo, reversal ? -1 : +1, volume);
+      AppendCompleted(o, c, hi, lo, +1, volume);
    }
    
-   //--- Complete bearish brick (OVO logic)
+   //+------------------------------------------------------------------+
+   //| EXACT OVO CompleteDownBrick() - Reference lines 379-419        |
+   //+------------------------------------------------------------------+
    void CompleteDownBrick(const bool reversal,
                           const double prior_high,
                           const double prior_low,
@@ -280,36 +302,45 @@ public:
       
       if(reversal)
       {
-         // Classic Renko: reversal up from downtrend
-         // With relocation: open 1 box above previous close, close 2 boxes above
-         o = m_last_close + m_brick_size_price;
-         c = m_last_close + 2.0 * m_brick_size_price;
-      }
-      else
-      {
-         // Continuation: open at last close, close 1 box down
-         o = m_last_close;
-         c = m_last_close - m_brick_size_price;
+         // Classic Renko reversal with relocation
+         if(m_relocate_open)
+         {
+            o = m_last_close + m_box;
+            c = m_last_close + 2.0 * m_box;
+         }
+         else
+         {
+            // No-gap visual form
+            o = m_last_close;
+            c = m_last_close + 2.0 * m_box;
+         }
+         
+         double hi = MathMax(o, c);
+         double lo = MathMin(o, c);
+         
+         if(!m_suppress_wicks)
+            lo = MathMin(lo, prior_low);
+         
+         AppendCompleted(o, c, hi, lo, +1, volume);
+         return;
       }
       
-      o = NormalizeDouble(o, m_digits);
-      c = NormalizeDouble(c, m_digits);
+      // Continuation
+      o = m_last_close;
+      c = m_last_close - m_box;
       
       double hi = MathMax(o, c);
       double lo = MathMin(o, c);
       
       if(!m_suppress_wicks)
-      {
-         if(reversal)
-            lo = MathMin(lo, prior_low);  // Up brick can have low wick
-         else
-            hi = MathMax(hi, prior_high);  // Down brick can have high wick
-      }
+         hi = MathMax(hi, prior_high);
       
-      AppendCompleted(o, c, hi, lo, reversal ? +1 : -1, volume);
+      AppendCompleted(o, c, hi, lo, -1, volume);
    }
    
-   //--- Append completed brick to buffer
+   //+------------------------------------------------------------------+
+   //| EXACT OVO AppendCompleted() - Reference lines 259-295          |
+   //+------------------------------------------------------------------+
    void AppendCompleted(const double open_price,
                         const double close_price,
                         const double wick_high,
@@ -322,10 +353,10 @@ public:
       
       RenkoBrick brick;
       brick.time = m_next_bar_time;
-      brick.open = NormalizeDouble(open_price, m_digits);
-      brick.close = NormalizeDouble(close_price, m_digits);
-      brick.high = NormalizeDouble(MathMax(MathMax(brick.open, brick.close), wick_high), m_digits);
-      brick.low = NormalizeDouble(MathMin(MathMin(brick.open, brick.close), wick_low), m_digits);
+      brick.open = NormalizeToTick(open_price);
+      brick.close = NormalizeToTick(close_price);
+      brick.high = NormalizeToTick(MathMax(MathMax(brick.open, brick.close), wick_high));
+      brick.low = NormalizeToTick(MathMin(MathMin(brick.open, brick.close), wick_low));
       brick.tick_volume = (long)MathMax((double)volume, 1.0);
       brick.spread = 0;
       brick.real_volume = 0;
@@ -376,10 +407,10 @@ public:
    {
       RenkoBrick forming;
       forming.time = m_next_bar_time;
-      forming.open = NormalizeDouble(m_last_close, m_digits);
-      forming.close = NormalizeDouble(m_last_price, m_digits);
-      forming.high = NormalizeDouble(MathMax(MathMax(forming.open, forming.close), m_pending_high), m_digits);
-      forming.low = NormalizeDouble(MathMin(MathMin(forming.open, forming.close), m_pending_low), m_digits);
+      forming.open = NormalizeToTick(m_last_close);
+      forming.close = NormalizeToTick(m_last_price);
+      forming.high = NormalizeToTick(MathMax(MathMax(forming.open, forming.close), m_pending_high));
+      forming.low = NormalizeToTick(MathMin(MathMin(forming.open, forming.close), m_pending_low));
       forming.tick_volume = (long)MathMax((double)m_tick_volume, 1.0);
       forming.spread = 0;
       forming.real_volume = 0;
@@ -413,13 +444,23 @@ public:
    long GetBrickSerial() const { return m_brick_serial; }
    
 private:
-   //--- Round anchor to brick grid (first brick only)
-   double RoundAnchor(const double price)
+   //--- Normalize to tick size (OVO NormalizeToTick)
+   double NormalizeToTick(const double price) const
    {
-      if(m_brick_size_price <= 0.0)
+      if(m_tick_size <= 0.0)
          return NormalizeDouble(price, m_digits);
       
-      return NormalizeDouble(MathRound(price / m_brick_size_price) * m_brick_size_price, m_digits);
+      double v = MathRound(price / m_tick_size) * m_tick_size;
+      return NormalizeDouble(v, m_digits);
+   }
+   
+   //--- Round anchor to brick grid (OVO RoundAnchor)
+   double RoundAnchor(const double price)
+   {
+      if(m_box <= 0.0)
+         return NormalizeToTick(price);
+      
+      return NormalizeToTick(MathRound(price / m_box) * m_box);
    }
 };
 

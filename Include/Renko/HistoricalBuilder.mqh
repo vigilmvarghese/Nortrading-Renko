@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024, Nortrading Renko Project"
 #property link      "https://github.com/vigilmvarghese/Nortrading-Renko"
-#property version   "1.00"
+#property version   "3.00"
 #property strict
 
 #include "RenkoTypes.mqh"
@@ -13,8 +13,8 @@
 #include "MeanRenkoEngine.mqh"
 
 //+------------------------------------------------------------------+
-//| Historical Builder                                               |
-//| Asynchronous tick reconstruction with progress and cache         |
+//| Historical Builder - Synchronous (OVO pattern)                  |
+//| Reference: OVO BuildHistoricalModel() - instant completion      |
 //+------------------------------------------------------------------+
 class CHistoricalBuilder
 {
@@ -29,29 +29,15 @@ private:
    datetime          m_cache_start_time;       // Cache start time
    datetime          m_cache_end_time;         // Cache end time
    
-   //--- Build state
-   bool              m_is_building;            // Building flag
-   int               m_build_index;            // Current build index
-   int               m_total_ticks;            // Total ticks to process
-   int               m_budget_ms;              // Budget per pass (milliseconds)
-   
-   BuildProgress     m_progress;               // Progress tracking
-   
    //--- Results
    RenkoBrick        m_result_bricks[];        // Result bricks
    int               m_result_count;           // Result count
-   
-   //--- Persistent engines for incremental build
-   CRegularRenkoEngine* m_regular_engine;      // Regular Renko engine
-   CMeanRenkoEngine*    m_mean_engine;         // Mean Renko engine
    
 public:
    //--- Constructor
    CHistoricalBuilder(string symbol = "", bool verbose = false)
       : m_symbol(symbol), m_verbose(verbose), m_cache_size(0), 
-        m_cache_enabled(true), m_is_building(false), m_build_index(0),
-        m_total_ticks(0), m_budget_ms(8), m_result_count(0),
-        m_regular_engine(NULL), m_mean_engine(NULL)
+        m_cache_enabled(true), m_result_count(0)
    {
       if(m_symbol == "")
          m_symbol = _Symbol;
@@ -61,22 +47,12 @@ public:
    }
    
    //--- Destructor
-   ~CHistoricalBuilder()
-   {
-      if(m_regular_engine != NULL)
-      {
-         delete m_regular_engine;
-         m_regular_engine = NULL;
-      }
-      if(m_mean_engine != NULL)
-      {
-         delete m_mean_engine;
-         m_mean_engine = NULL;
-      }
-   }
+   ~CHistoricalBuilder() {}
    
-   //--- Load ticks into cache
-   bool LoadTickCache(int history_days)
+   //+------------------------------------------------------------------+
+   //| Load ticks into cache (OVO EnsureTickCache pattern)            |
+   //+------------------------------------------------------------------+
+   bool LoadTickCache(int history_days, int chunk_minutes = 180)
    {
       if(!m_cache_enabled)
          return false;
@@ -97,101 +73,77 @@ public:
       
       uint start_ms = GetTickCount();
       
-      // Copy ticks for the entire period
-      int copied = CopyTicks(m_symbol, m_tick_cache, COPY_TICKS_ALL, 
-                             (ulong)(from * 1000), 0);
+      ArrayResize(m_tick_cache, 0);
+      m_cache_size = 0;
       
-      if(copied <= 0)
+      ulong from_msc = (ulong)from * 1000;
+      ulong to_msc = (ulong)now * 1000;
+      ulong chunk_ms = (ulong)MathMax(chunk_minutes, 1) * 60 * 1000;
+      
+      // Load ticks in chunks to avoid single-call limits
+      for(ulong cursor = from_msc; cursor <= to_msc; )
       {
-         Print("ERROR: Failed to load tick cache. Error: ", GetLastError());
-         return false;
+         ulong chunk_end = cursor + chunk_ms - 1;
+         if(chunk_end > to_msc)
+            chunk_end = to_msc;
+         
+         MqlTick ticks[];
+         ResetLastError();
+         int copied = CopyTicksRange(m_symbol, ticks, COPY_TICKS_ALL, cursor, chunk_end);
+         
+         if(copied > 0)
+         {
+            int old_size = m_cache_size;
+            ArrayResize(m_tick_cache, old_size + copied, 65536);
+            
+            for(int i = 0; i < copied; i++)
+               m_tick_cache[old_size + i] = ticks[i];
+            
+            m_cache_size += copied;
+         }
+         
+         if(chunk_end == to_msc)
+            break;
+         
+         cursor = chunk_end + 1;
       }
       
-      m_cache_size = copied;
       m_cache_start_time = from;
       m_cache_end_time = now;
       
       uint elapsed_ms = GetTickCount() - start_ms;
       
       if(m_verbose)
-         Print("Loaded ", m_cache_size, " ticks into cache in ", elapsed_ms, " ms");
+         PrintFormat("Loaded %d ticks into cache in %d ms", m_cache_size, elapsed_ms);
       
-      return true;
+      return (m_cache_size > 0);
    }
    
-   //--- Append new ticks to cache
-   bool AppendToCache()
+   //+------------------------------------------------------------------+
+   //| SYNCHRONOUS Build - Instant completion (OVO pattern)           |
+   //| Reference: OVO BuildHistoricalModel() - no async passes        |
+   //+------------------------------------------------------------------+
+   bool BuildHistory(ENUM_RENKO_TYPE type, double brick_size_points, 
+                     bool suppress_wicks, int history_days,
+                     bool relocate_open = true)
    {
-      if(!m_cache_enabled || m_cache_size == 0)
+      if(brick_size_points <= 0)
          return false;
       
-      datetime now = TimeCurrent();
-      
-      if(m_cache_end_time >= now)
-         return true;  // Already up to date
-      
-      // Get ticks since last cache update
-      MqlTick new_ticks[];
-      int copied = CopyTicks(m_symbol, new_ticks, COPY_TICKS_ALL,
-                             (ulong)(m_cache_end_time * 1000), 0);
-      
-      if(copied <= 0)
-         return true;  // No new ticks
-      
-      // Append to cache
-      int old_size = m_cache_size;
-      ArrayResize(m_tick_cache, old_size + copied);
-      ArrayCopy(m_tick_cache, new_ticks, old_size);
-      
-      m_cache_size = old_size + copied;
-      m_cache_end_time = now;
-      
-      if(m_verbose)
-         Print("Appended ", copied, " new ticks to cache. Total: ", m_cache_size);
-      
-      return true;
-   }
-   
-   //--- Start asynchronous build
-   bool StartBuild(ENUM_RENKO_TYPE type, double brick_size_points, 
-                   bool suppress_wicks, int history_days)
-   {
-      if(m_is_building)
-         return false;
-      
-      // Clean up old engines
-      if(m_regular_engine != NULL)
-      {
-         delete m_regular_engine;
-         m_regular_engine = NULL;
-      }
-      if(m_mean_engine != NULL)
-      {
-         delete m_mean_engine;
-         m_mean_engine = NULL;
-      }
-      
-      // Create persistent engine for this build
-      if(type == RENKO_REGULAR)
-      {
-         m_regular_engine = new CRegularRenkoEngine(m_symbol, m_verbose);
-         m_regular_engine.Configure(brick_size_points, suppress_wicks);
-      }
-      else if(type == RENKO_MEAN)
-      {
-         m_mean_engine = new CMeanRenkoEngine(m_symbol, m_verbose);
-         m_mean_engine.Configure(brick_size_points, suppress_wicks);
-      }
+      uint build_start_ms = GetTickCount();
       
       // Load tick cache if enabled
       if(m_cache_enabled)
       {
          if(!LoadTickCache(history_days))
+         {
+            Print("ERROR: Failed to load tick cache");
             return false;
+         }
       }
       else
       {
-         // Load ticks directly without caching
+         // Load ticks directly without caching (fallback)
          datetime now = TimeCurrent();
          datetime from = now - (history_days * 86400);
          
@@ -207,97 +159,111 @@ public:
          m_cache_size = copied;
       }
       
-      // Initialize build state
-      m_is_building = true;
-      m_build_index = 0;
-      m_total_ticks = m_cache_size;
-      m_result_count = 0;
-      
-      ArrayResize(m_result_bricks, 0);
-      m_progress.Start(m_total_ticks);
-      
-      if(m_verbose)
-         Print("Started asynchronous build with ", m_total_ticks, " ticks");
-      
-      return true;
-   }
-   
-   //--- Process one build pass (SYNCHRONOUS - all ticks at once)
-   bool ProcessBuildPass(ENUM_RENKO_TYPE type, double brick_size_points,
-                         bool suppress_wicks)
-   {
-      if(!m_is_building)
-         return false;
-      
-      uint start_time = GetTickCount();
-      
-      if(m_verbose)
-         Print("Processing ", m_total_ticks, " ticks synchronously...");
-      
-      // ✅ SYNCHRONOUS BUILD: Process ALL ticks in one pass
-      // No time budget - complete immediately
-      while(m_build_index < m_total_ticks)
+      if(m_cache_size <= 0)
       {
-         MqlTick tick = m_tick_cache[m_build_index];
-         double price = tick.bid > 0 ? tick.bid : tick.last;
-         
-         if(price > 0)
-         {
-            ENUM_DIRTY_STATE dirty = DIRTY_NONE;
-            
-            if(type == RENKO_REGULAR && m_regular_engine != NULL)
-               dirty = m_regular_engine.ProcessTick(price, tick.time);
-            else if(type == RENKO_MEAN && m_mean_engine != NULL)
-               dirty = m_mean_engine.ProcessTick(price, tick.time);
-            
-            // Collect completed bricks
-            if(dirty == DIRTY_BRICK_COMPLETED || dirty == DIRTY_MULTI_BRICK_COMPLETED)
-            {
-               RenkoBrick completed[];
-               int count = 0;
-               
-               if(type == RENKO_REGULAR && m_regular_engine != NULL)
-                  count = m_regular_engine.GetCompletedBricks(completed);
-               else if(type == RENKO_MEAN && m_mean_engine != NULL)
-                  count = m_mean_engine.GetCompletedBricks(completed);
-               
-               // Add to results
-               if(count > 0)
-               {
-                  int old_size = m_result_count;
-                  ArrayResize(m_result_bricks, old_size + count);
-                  
-                  for(int i = 0; i < count; i++)
-                     m_result_bricks[old_size + i] = completed[i];
-                  
-                  m_result_count += count;
-                  m_progress.total_bricks = m_result_count;
-               }
-            }
-         }
-         
-         m_build_index++;
-         m_progress.processed_ticks = m_build_index;
+         Print("ERROR: No ticks available for historical build");
+         return false;
       }
       
-      // Build finished - mark complete
-      uint elapsed_ms = GetTickCount() - start_time;
-      m_is_building = false;
-      m_progress.Complete();
+      // Create engine instance
+      CRegularRenkoEngine* regular_engine = NULL;
+      CMeanRenkoEngine* mean_engine = NULL;
+      
+      if(type == RENKO_REGULAR)
+      {
+         regular_engine = new CRegularRenkoEngine(m_symbol, m_verbose);
+         regular_engine.Configure(brick_size_points, suppress_wicks, relocate_open);
+      }
+      else if(type == RENKO_MEAN)
+      {
+         mean_engine = new CMeanRenkoEngine(m_symbol, m_verbose);
+         mean_engine.Configure(brick_size_points, suppress_wicks);
+      }
+      else
+      {
+         Print("ERROR: Unsupported Renko type");
+         return false;
+      }
       
       if(m_verbose)
-         Print("Build completed: ", m_result_count, " bricks from ", 
-               m_total_ticks, " ticks in ", elapsed_ms, " ms");
+         PrintFormat("Processing %d ticks synchronously...", m_cache_size);
       
-      return false;  // Build finished (single pass)
+      // ✅ SYNCHRONOUS BUILD: Process ALL ticks in one go
+      int total_bricks = 0;
+      
+      for(int i = 0; i < m_cache_size; i++)
+      {
+         MqlTick tick = m_tick_cache[i];
+         double price = tick.bid > 0 ? tick.bid : tick.last;
+         
+         if(price <= 0)
+            continue;
+         
+         ENUM_DIRTY_STATE dirty = DIRTY_NONE;
+         
+         if(type == RENKO_REGULAR && regular_engine != NULL)
+            dirty = regular_engine.ProcessTick(price, tick.time);
+         else if(type == RENKO_MEAN && mean_engine != NULL)
+            dirty = mean_engine.ProcessTick(price, tick.time);
+         
+         // Collect completed bricks
+         if(dirty == DIRTY_BRICK_COMPLETED || dirty == DIRTY_MULTI_BRICK_COMPLETED)
+         {
+            RenkoBrick completed[];
+            int count = 0;
+            
+            if(type == RENKO_REGULAR && regular_engine != NULL)
+               count = regular_engine.GetCompletedBricks(completed);
+            else if(type == RENKO_MEAN && mean_engine != NULL)
+               count = mean_engine.GetCompletedBricks(completed);
+            
+            // Add to results
+            if(count > 0)
+            {
+               int old_size = m_result_count;
+               ArrayResize(m_result_bricks, old_size + count);
+               
+               for(int j = 0; j < count; j++)
+                  m_result_bricks[old_size + j] = completed[j];
+               
+               m_result_count += count;
+               total_bricks += count;
+            }
+         }
+      }
+      
+      // Add forming brick to results
+      RenkoBrick forming;
+      if(type == RENKO_REGULAR && regular_engine != NULL)
+         forming = regular_engine.GetFormingBrick();
+      else if(type == RENKO_MEAN && mean_engine != NULL)
+         forming = mean_engine.GetFormingBrick();
+      
+      if(forming.time > 0)
+      {
+         ArrayResize(m_result_bricks, m_result_count + 1);
+         m_result_bricks[m_result_count] = forming;
+         m_result_count++;
+      }
+      
+      // Cleanup engines
+      if(regular_engine != NULL)
+         delete regular_engine;
+      if(mean_engine != NULL)
+         delete mean_engine;
+      
+      uint elapsed_ms = GetTickCount() - build_start_ms;
+      
+      if(m_verbose)
+         PrintFormat("Build completed: %d bricks from %d ticks in %d ms",
+                     m_result_count, m_cache_size, elapsed_ms);
+      
+      return true;
    }
    
    //--- Get build results
    int GetResults(RenkoBrick &bricks[])
    {
-      if(m_is_building)
-         return 0;
-      
       ArrayResize(bricks, m_result_count);
       for(int i = 0; i < m_result_count; i++)
          bricks[i] = m_result_bricks[i];
@@ -305,37 +271,11 @@ public:
       return m_result_count;
    }
    
-   //--- Get progress
-   BuildProgress GetProgress() const
-   {
-      return m_progress;
-   }
-   
-   //--- Check if building
-   bool IsBuilding() const
-   {
-      return m_is_building;
-   }
-   
-   //--- Cancel build
-   void CancelBuild()
-   {
-      m_is_building = false;
-      m_build_index = 0;
-      m_progress.Reset();
-   }
-   
-   //--- Set budget
-   void SetBudgetMs(int budget_ms)
-   {
-      m_budget_ms = budget_ms;
-   }
+   //--- Get result count
+   int GetResultCount() const { return m_result_count; }
    
    //--- Enable/disable cache
-   void EnableCache(bool enable)
-   {
-      m_cache_enabled = enable;
-   }
+   void EnableCache(bool enable) { m_cache_enabled = enable; }
    
    //--- Clear cache
    void ClearCache()
@@ -344,6 +284,13 @@ public:
       m_cache_size = 0;
       m_cache_start_time = 0;
       m_cache_end_time = 0;
+   }
+   
+   //--- Clear results
+   void ClearResults()
+   {
+      ArrayResize(m_result_bricks, 0);
+      m_result_count = 0;
    }
    
    //--- Get cache info
