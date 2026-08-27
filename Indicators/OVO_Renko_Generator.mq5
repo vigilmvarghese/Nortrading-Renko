@@ -240,6 +240,14 @@ void OnDeinit(const int reason)
       Print("⚠️ Could not delete global variable: ", gv_name, ", error: ", GetLastError());
    }
    
+   // ✅ Release ownership of custom symbol
+   string custom_symbol = _Symbol + "." + g_config.period_token;
+   string owner_gv = StringFormat("OVORenko_Owner_%s", custom_symbol);
+   if(GlobalVariableDel(owner_gv))
+   {
+      Print("✅ Released ownership of ", custom_symbol);
+   }
+   
    // ✅ Force delete any remaining objects with our prefix ONLY IN OUR WINDOW
    string prefix = StringFormat("OVORenko_%I64d_%s_", ChartID(), g_config.period_token);
    if(g_our_subwindow > 0)
@@ -797,6 +805,48 @@ void StartRebuild()
 {
    Print("=== Starting SYNCHRONOUS Rebuild ===");
    
+   // ✅ CRITICAL FIX: Check if this custom symbol is already owned by another chart
+   string custom_symbol = _Symbol + "." + g_config.period_token;
+   string owner_gv = StringFormat("OVORenko_Owner_%s", custom_symbol);
+   long current_chart = ChartID();
+   
+   if(GlobalVariableCheck(owner_gv))
+   {
+      long owner_chart_id = (long)GlobalVariableGet(owner_gv);
+      
+      // If owned by a different chart, check if that chart still exists
+      if(owner_chart_id != current_chart && owner_chart_id > 0)
+      {
+         string owner_symbol = ChartSymbol(owner_chart_id);
+         
+         if(owner_symbol != "" && owner_symbol != NULL)
+         {
+            // Owner chart still exists - this is a collision!
+            Print("❌ ERROR: Custom symbol ", custom_symbol, " is already in use by Chart ", owner_chart_id);
+            Print("   Current chart: ", current_chart);
+            Print("   Owner chart: ", owner_chart_id, " (", owner_symbol, ")");
+            
+            Alert("Period token ", g_config.period_token, " collision!\nAnother ", _Symbol, 
+                  " chart is already using this token.\nTry a different token or close the other chart first.");
+            
+            g_state = STATE_PANEL_ONLY;
+            if(g_panel != NULL)
+               g_panel.SetStatusText("Token Collision!");
+            
+            return;
+         }
+         else
+         {
+            // Owner chart was closed - we can take over
+            Print("⚠️ Previous owner chart ", owner_chart_id, " no longer exists - taking over ", custom_symbol);
+         }
+      }
+   }
+   
+   // Claim ownership of this custom symbol
+   GlobalVariableSet(owner_gv, (double)current_chart);
+   Print("✅ Claimed ownership of ", custom_symbol, " for chart ", current_chart);
+   
    g_rebuild_requested = false;
    
    // Get runtime brick size from panel
@@ -873,22 +923,42 @@ void StartRebuild()
    // ⚡ CRITICAL: Force complete chart reload to clear old cached bars
    string custom_symbol = g_publisher.GetCustomSymbolName();
    
+   // ✅ FIXED: Only close charts that belong to THIS generator instance
+   // Check ownership before closing
+   string owner_gv = StringFormat("OVORenko_Owner_%s", custom_symbol);
+   long current_chart = ChartID();
+   long owner_chart_id = current_chart;  // Assume we own it
+   
+   if(GlobalVariableCheck(owner_gv))
+   {
+      owner_chart_id = (long)GlobalVariableGet(owner_gv);
+   }
+   
    // Find existing chart first
    long existing_chart_id = g_chart_manager.FindChart(custom_symbol);
    if(existing_chart_id > 0)
    {
-      if(InpVerboseLog)
-         Print("Found existing chart ", existing_chart_id, " - closing it to force clean reload");
-      
-      // ⚡ CRITICAL FIX: Close the chart completely to clear cached data
-      // This ensures MT5 reloads data from custom symbol (which we just cleaned)
-      ChartClose(existing_chart_id);
-      
-      // Give MT5 time to close and clear cache
-      Sleep(300);
-      
-      if(InpVerboseLog)
-         Print("Old chart closed - will reopen with fresh data");
+      // ✅ CRITICAL FIX: Only close if WE own this chart
+      if(owner_chart_id == current_chart)
+      {
+         if(InpVerboseLog)
+            Print("Found existing chart ", existing_chart_id, " owned by US - closing it to force clean reload");
+         
+         // This ensures MT5 reloads data from custom symbol (which we just cleaned)
+         ChartClose(existing_chart_id);
+         
+         // Give MT5 time to close and clear cache
+         Sleep(300);
+         
+         if(InpVerboseLog)
+            Print("Old chart closed - will reopen with fresh data");
+      }
+      else
+      {
+         if(InpVerboseLog)
+            Print("Found existing chart ", existing_chart_id, " but it belongs to Chart ", 
+                  owner_chart_id, " - NOT closing it");
+      }
    }
    
    // Open/switch to chart (will create new chart with clean data)
