@@ -10,6 +10,8 @@
 #property description "Synchronous history build, instant completion"
 #property indicator_separate_window
 #property indicator_height 30
+#property indicator_minimum 0
+#property indicator_maximum 1
 #property indicator_plots   1
 #property indicator_buffers 1
 #property indicator_type1   DRAW_NONE
