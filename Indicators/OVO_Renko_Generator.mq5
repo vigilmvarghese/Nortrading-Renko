@@ -9,7 +9,7 @@
 #property description "MT5 OVO-Style Renko Generator - Exact OVO Implementation"
 #property description "Synchronous history build, instant completion"
 #property indicator_separate_window
-#property indicator_height 30
+#property indicator_height 24
 #property indicator_minimum 0
 #property indicator_maximum 1
 #property indicator_levelcolor clrNONE
