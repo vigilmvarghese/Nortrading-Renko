@@ -214,15 +214,14 @@ void OnDeinit(const int reason)
    if(ObjectFind(ChartID(), marker) >= 0)
    {
       ObjectDelete(ChartID(), marker);
-      Print("✅ Released period token ", g_config.period_token, " (deleted marker)");
+      Print("✅ Deleted marker for ", g_config.period_token);
    }
    
-   // ✅ Delete registry object
-   string registry_object = StringFormat("RENKO_SLOT_%I64d_%s_%s", ChartID(), _Symbol, g_config.period_token);
-   if(ObjectFind(0, registry_object) >= 0)
+   // ✅ Delete global variable to free up the period token
+   string gv_name = StringFormat("OVORenko_Token_%I64d_%s_%s", ChartID(), _Symbol, g_config.period_token);
+   if(GlobalVariableDel(gv_name))
    {
-      ObjectDelete(0, registry_object);
-      Print("✅ Deleted registry object for ", g_config.period_token);
+      Print("✅ Released period token ", g_config.period_token, " (deleted global variable)");
    }
    
    // ✅ Force delete any remaining objects with our prefix
@@ -510,13 +509,12 @@ bool ValidateInputs()
 //| Find next available period token for this symbol                |
 //+------------------------------------------------------------------+
 //| Find next available period token for this symbol                |
-//| Checks for active indicator instances on chart (not custom symbols) |
+//| Uses Global Variables for reliable cross-instance detection     |
 //+------------------------------------------------------------------+
 string FindNextAvailablePeriodToken(string source_symbol)
 {
    // Extract base period (M or any prefix) from InpPeriodToken
    string base_period = "M";
-   int number_start = 0;
    
    // Find where the number starts in InpPeriodToken
    for(int i = 0; i < StringLen(InpPeriodToken); i++)
@@ -530,65 +528,23 @@ string FindNextAvailablePeriodToken(string source_symbol)
    
    if(base_period == "") base_period = "M";  // Default to M if no prefix found
    
-   // ✅ NEW APPROACH: Check for active indicator instances on THIS CHART
-   // by looking for:
-   // 1. Marker objects (instances that have found their window)
-   // 2. Panel objects (instances that have created panels)
-   // 3. Registry objects (instances that have registered themselves)
-   
+   // ✅ Use Global Variables - most reliable method for cross-instance tracking
    for(int num = 61; num <= 99; num++)
    {
       string test_period = base_period + IntegerToString(num);
-      bool token_in_use = false;
       
-      // Check for markers
-      string mean_marker = StringFormat("OVO_Renko_%s_Mean_marker", test_period);
-      string regular_marker = StringFormat("OVO_Renko_%s_Regular_marker", test_period);
+      // Check global variable for this token
+      string gv_name = StringFormat("OVORenko_Token_%I64d_%s_%s", ChartID(), source_symbol, test_period);
       
-      if(ObjectFind(ChartID(), mean_marker) >= 0)
+      if(GlobalVariableCheck(gv_name))
       {
-         Print("⚠️ Period token ", test_period, " in use (found mean marker)");
-         token_in_use = true;
-      }
-      else if(ObjectFind(ChartID(), regular_marker) >= 0)
-      {
-         Print("⚠️ Period token ", test_period, " in use (found regular marker)");
-         token_in_use = true;
+         Print("⚠️ Period token ", test_period, " in use (global variable exists)");
+         continue;  // Token in use
       }
       
-      // Also check for registry objects from RegisterPeriodToken()
-      if(!token_in_use)
-      {
-         string reg_pattern = StringFormat("RENKO_SLOT_%I64d_%s_%s", ChartID(), source_symbol, test_period);
-         if(ObjectFind(0, reg_pattern) >= 0)
-         {
-            Print("⚠️ Period token ", test_period, " in use (found registry object)");
-            token_in_use = true;
-         }
-      }
-      
-      // Also check for panel background objects (most reliable)
-      if(!token_in_use)
-      {
-         // Search all windows for panel objects with this period token
-         int total_windows = (int)ChartGetInteger(ChartID(), CHART_WINDOWS_TOTAL);
-         for(int w = 0; w < total_windows; w++)
-         {
-            string panel_bg = StringFormat("OVORenko_%I64d_%s_BG", ChartID(), test_period);
-            if(ObjectFind(ChartID(), panel_bg) >= 0)
-            {
-               Print("⚠️ Period token ", test_period, " in use (found panel object)");
-               token_in_use = true;
-               break;
-            }
-         }
-      }
-      
-      if(!token_in_use)
-      {
-         Print("✅ Auto-assigned period token: ", test_period, " (available slot on chart)");
-         return test_period;
-      }
+      // Token is available!
+      Print("✅ Auto-assigned period token: ", test_period, " (available slot)");
+      return test_period;
    }
    
    // Fallback: use the input token
@@ -609,19 +565,10 @@ void InitializeConfig()
    string auto_period = FindNextAvailablePeriodToken(_Symbol);
    g_config.period_token = auto_period;  // Use auto-assigned token instead of input
    
-   // ✅ IMMEDIATELY register this token to prevent other instances from taking it
-   string registry_object = StringFormat("RENKO_SLOT_%I64d_%s_%s", ChartID(), _Symbol, auto_period);
-   if(!ObjectCreate(0, registry_object, OBJ_LABEL, 0, 0, 0))
-   {
-      Print("⚠️ Warning: Could not create registry object for ", auto_period);
-   }
-   else
-   {
-      ObjectSetInteger(0, registry_object, OBJPROP_HIDDEN, true);
-      ObjectSetInteger(0, registry_object, OBJPROP_SELECTABLE, false);
-      ObjectSetString(0, registry_object, OBJPROP_TEXT, auto_period);
-      Print("✅ Registered period token: ", auto_period, " (registry object created)");
-   }
+   // ✅ IMMEDIATELY register this token using Global Variable (most reliable)
+   string gv_name = StringFormat("OVORenko_Token_%I64d_%s_%s", ChartID(), _Symbol, auto_period);
+   GlobalVariableSet(gv_name, 1.0);  // Set to 1 to mark as in-use
+   Print("✅ Registered period token: ", auto_period, " (global variable: ", gv_name, ")");
    
    g_config.history_days = InpHistoryDays;
    g_config.live_pump_ms = InpLivePumpMs;
