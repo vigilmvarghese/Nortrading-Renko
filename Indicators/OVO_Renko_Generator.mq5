@@ -292,156 +292,131 @@ void OnTimer()
    // ✅ FIRST: Check if we need to create the panel (deferred from OnInit)
    if(g_state == STATE_INITIALIZING && g_panel == NULL)
    {
-      // ✅ Find our subwindow - MT5 assigns windows in order
-      // First instance gets window 1, second gets window 2, etc.
-      // We need to find which window THIS instance is in
+      // ✅ NEW STRATEGY: Don't use ChartWindowFind (returns same window for all instances)
+      // Instead: Iterate through ALL windows and find first unclaimed one
       
       int subwindow = -1;
+      int total_windows = (int)ChartGetInteger(ChartID(), CHART_WINDOWS_TOTAL);
       
-      // Try ChartWindowFind first with the display name
-      subwindow = ChartWindowFind(ChartID(), "OVO_Renko_Generator");
+      static int init_attempts = 0;
+      init_attempts++;
       
-      if(subwindow > 0)
+      if(init_attempts == 1 || init_attempts % 10 == 0)
       {
-         Print("📊 ChartWindowFind returned: ", subwindow);
+         Print("📊 [", g_config.period_token, "] Looking for window (attempt ", init_attempts, ")");
+         Print("   Total windows on chart: ", total_windows);
       }
       
-      if(subwindow < 0 || subwindow == 0)
+      // Scan all windows to find an unclaimed one
+      for(int w = 1; w < total_windows; w++)
       {
-         // If that doesn't work, iterate through windows and test object creation
-         // with our unique prefix to find an unclaimed window
-         int total_windows = (int)ChartGetInteger(ChartID(), CHART_WINDOWS_TOTAL);
-         Print("📊 Total windows on chart: ", total_windows);
+         bool window_has_our_panel = false;
+         bool window_has_other_panel = false;
+         string other_panel_name = "";
          
-         for(int w = 1; w < total_windows; w++)
+         // Check all objects in this window
+         int obj_total = ObjectsTotal(ChartID(), w, -1);
+         
+         for(int i = 0; i < obj_total; i++)
          {
-            Print("   Checking window ", w, "...");
+            string obj_name = ObjectName(ChartID(), i, w, -1);
             
-            // ✅ CRITICAL FIX: Check if window is occupied by ANY OVORenko panel first
-            bool window_occupied = false;
-            int obj_total = ObjectsTotal(ChartID(), w, -1);
-            
-            for(int i = 0; i < obj_total; i++)
+            // Look for ANY OVORenko panel object (BG, TypeLabel, etc.)
+            if(StringFind(obj_name, "OVORenko_") == 0)
             {
-               string obj_name = ObjectName(ChartID(), i, w, -1);
+               // Extract the period token from the object name
+               // Format: OVORenko_{ChartID}_{Token}_ObjectName
+               // Example: OVORenko_123456789_M61_BG
                
-               // Check if this object belongs to an OVORenko panel
-               if(StringFind(obj_name, "OVORenko_") == 0)  // Starts with "OVORenko_"
+               string our_prefix = StringFormat("OVORenko_%I64d_%s_", ChartID(), g_config.period_token);
+               
+               if(StringFind(obj_name, our_prefix) == 0)
                {
-                  // Check if it's OUR object or another instance's object
-                  string our_prefix = StringFormat("OVORenko_%I64d_%s_", ChartID(), g_config.period_token);
-                  
-                  if(StringFind(obj_name, our_prefix) == 0)
-                  {
-                     // It's OUR object - we already claimed this window
-                     subwindow = w;
-                     Print("   ✅ Found our existing panel in window ", w);
-                     window_occupied = false;  // Not occupied by ANOTHER instance
-                     break;
-                  }
-                  else
-                  {
-                     // It's ANOTHER instance's object - window is occupied
-                     Print("   ⚠️ Window ", w, " occupied by another instance: ", obj_name);
-                     window_occupied = true;
-                     break;
-                  }
+                  // This is OUR panel object
+                  window_has_our_panel = true;
+                  subwindow = w;
+                  if(init_attempts == 1 || init_attempts % 10 == 0)
+                     Print("   Window ", w, ": Found our panel (", g_config.period_token, ")");
+                  break;
+               }
+               else
+               {
+                  // This is ANOTHER instance's panel object
+                  window_has_other_panel = true;
+                  other_panel_name = obj_name;
+                  if(init_attempts == 1 || init_attempts % 10 == 0)
+                     Print("   Window ", w, ": Occupied by another instance (", obj_name, ")");
+                  break;
                }
             }
-            
-            if(window_occupied)
-            {
-               continue;  // Skip this window, try next
-            }
-            
-            if(subwindow == w)
-            {
-               break;  // Found our existing panel
-            }
-            
-            // Window is free - try to claim it with a marker
+         }
+         
+         // If we found our panel, use this window
+         if(window_has_our_panel)
+         {
+            subwindow = w;
+            break;
+         }
+         
+         // If window is occupied by another instance, skip it
+         if(window_has_other_panel)
+         {
+            continue;
+         }
+         
+         // Window is free - try to claim it
+         if(subwindow < 0)
+         {
+            // Try to create a test marker to claim this window
             string marker = g_unique_name + "_marker";
             
             if(ObjectCreate(ChartID(), marker, OBJ_LABEL, w, 0, 0))
             {
                ObjectSetInteger(ChartID(), marker, OBJPROP_HIDDEN, true);
                ObjectSetString(ChartID(), marker, OBJPROP_TEXT, g_unique_name);
+               ObjectSetInteger(ChartID(), marker, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);  // Hide on all timeframes
+               
                subwindow = w;
-               Print("   ✅ Claimed free window: ", w, " with marker: ", marker);
+               if(init_attempts == 1 || init_attempts % 10 == 0)
+                  Print("   Window ", w, ": Claimed for ", g_config.period_token);
                break;
             }
             else
             {
-               Print("   ❌ Failed to create marker in window ", w, ", error: ", GetLastError());
+               if(init_attempts == 1)
+                  Print("   Window ", w, ": Failed to create marker, error: ", GetLastError());
             }
          }
       }
       
+      // If no window found, wait for MT5 to create one
       if(subwindow < 0 || subwindow == 0)
       {
-         // Window not found yet - MT5 may still be creating it
-         static int wait_count = 0;
-         wait_count++;
-         if(wait_count % 10 == 0)  // Log every 10 attempts
-            Print("⏳ Waiting for indicator window... (attempt ", wait_count, ", unique_name: ", g_unique_name, ")");
+         if(init_attempts == 1 || init_attempts % 50 == 0)
+            Print("⏳ [", g_config.period_token, "] Waiting for window to be available (attempt ", init_attempts, ")");
+         
+         // ⚠️ CRITICAL: If we've been waiting too long, MT5 might not create our window
+         // This can happen if the indicator is being rapidly added/removed
+         if(init_attempts > 200)  // 200 timer ticks = ~1-4 seconds depending on timer
+         {
+            Print("❌ [", g_config.period_token, "] ERROR: Could not find window after ", init_attempts, " attempts");
+            Print("   This usually means MT5 didn't create a dedicated window for this instance");
+            Print("   Try removing ALL instances and adding them one at a time with a 2-second pause");
+            g_state = STATE_PANEL_ONLY;  // Give up, but don't crash
+         }
          return;  // Try again on next timer tick
       }
       
-      Print("📊 Using subwindow: ", subwindow, " for ", g_unique_name);
+      Print("📊 [", g_config.period_token, "] Using subwindow: ", subwindow);
       
+      // ✅ Create panel in the claimed window
       if(subwindow > 0)
       {
-         // ✅ Window found! Create panel now
          string unique_prefix = StringFormat("OVORenko_%I64d_%s_", ChartID(), g_config.period_token);
          
-         // ⚠️ CRITICAL SAFETY CHECK: Verify this window doesn't already have another instance's panel
-         // Look for ANY OVORenko panel background object in this window
-         bool window_occupied = false;
-         string existing_panel_prefix = "";
-         
-         int obj_total = ObjectsTotal(ChartID(), subwindow, -1);  // All object types
-         for(int i = 0; i < obj_total; i++)
-         {
-            string obj_name = ObjectName(ChartID(), i, subwindow, -1);
-            
-            // Check if this is an OVORenko panel object
-            if(StringFind(obj_name, "OVORenko_") == 0)  // Starts with "OVORenko_"
-            {
-               // Extract the prefix (everything before "BG", "TypeLabel", etc.)
-               int underscore_count = 0;
-               string detected_prefix = "";
-               
-               for(int c = 0; c < StringLen(obj_name); c++)
-               {
-                  if(StringGetCharacter(obj_name, c) == '_')
-                  {
-                     underscore_count++;
-                     if(underscore_count >= 3)  // After "OVORenko_<ChartID>_<Token>_"
-                     {
-                        detected_prefix = StringSubstr(obj_name, 0, c + 1);
-                        break;
-                     }
-                  }
-               }
-               
-               if(detected_prefix != "" && detected_prefix != unique_prefix)
-               {
-                  // This window has ANOTHER instance's panel!
-                  window_occupied = true;
-                  existing_panel_prefix = detected_prefix;
-                  Print("⚠️ Window ", subwindow, " already occupied by prefix: ", existing_panel_prefix);
-                  Print("   Our prefix: ", unique_prefix);
-                  break;
-               }
-            }
-         }
-         
-         if(window_occupied)
-         {
-            Print("❌ Cannot use window ", subwindow, " - already has another instance's panel");
-            Print("   Waiting for MT5 to create our dedicated window...");
-            return;  // Retry on next timer tick - wait for the NEW window to be created
-         }
+         Print("🎨 [", g_config.period_token, "] Creating panel:");
+         Print("   Subwindow: ", subwindow);
+         Print("   Prefix: ", unique_prefix);
          
          g_panel = new CPanelUI(ChartID(), subwindow, unique_prefix, InpVerboseLog);
          g_panel.SetChartType(InpChartType);
@@ -449,43 +424,36 @@ void OnTimer()
          g_panel.SetPeriodText(g_config.period_token);
          g_panel.SetStatusText("Ready");
          
-         // ✅ Save our subwindow number for later use
          g_our_subwindow = subwindow;
-         
-         Print("🎨 Creating panel with:");
-         Print("   Chart ID: ", ChartID());
-         Print("   Subwindow: ", subwindow);
-         Print("   Prefix: ", unique_prefix);
-         Print("   Chart Type: ", (InpChartType == RENKO_MEAN ? "Mean Renko" : "Regular Renko"));
-         Print("   Period: ", g_config.period_token);
          
          bool panel_created = g_panel.CreatePanel();
          
          if(panel_created)
          {
-            Print("✅ Panel created successfully in subwindow ", subwindow);
+            Print("✅ [", g_config.period_token, "] Panel created in window ", subwindow);
             
-            // ✅ Verify our objects are actually visible in the correct window
+            // Verify panel objects are visible
             string bg_name = unique_prefix + "BG";
             int bg_window = ObjectFind(ChartID(), bg_name);
+            
             if(bg_window == subwindow)
             {
-               Print("✅ Verified: Panel objects in window ", subwindow);
+               Print("✅ [", g_config.period_token, "] Verified: Objects in window ", subwindow);
+               ChartRedraw(ChartID());
+               g_state = STATE_PANEL_ONLY;
+               init_attempts = 0;  // Reset counter for next instance
             }
             else
             {
-               Print("❌ ERROR: Panel objects not in expected window!");
+               Print("❌ [", g_config.period_token, "] ERROR: Objects in wrong window!");
                Print("   Expected: ", subwindow, ", Found: ", bg_window);
+               // Don't change state - will retry
             }
-            
-            // ✅ Force a chart redraw to make objects visible
-            ChartRedraw(ChartID());
-            
-            g_state = STATE_PANEL_ONLY;
          }
          else
          {
-            Print("❌ ERROR: Panel creation failed!");
+            Print("❌ [", g_config.period_token, "] ERROR: Panel creation failed!");
+            // Don't change state - will retry
          }
       }
       
