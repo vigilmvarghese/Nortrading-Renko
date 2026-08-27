@@ -140,25 +140,27 @@ int OnInit()
                                      (InpChartType == RENKO_MEAN ? "Mean" : "Regular"));
    IndicatorSetString(INDICATOR_SHORTNAME, short_name);
    
-   // ✅ For indicator_separate_window, ChartWindowOnDropped() returns the subwindow number
-   // Each instance gets its own separate window with incremental numbers (1, 2, 3...)
-   int subwindow = ChartWindowOnDropped();
-   Print("📍 ChartWindowOnDropped() returned: ", subwindow);
+   // ✅ IMPORTANT: For indicator_separate_window with multiple instances:
+   // ChartWindowOnDropped() returns where you DROPPED from (usually 1 for all)
+   // We need to find the ACTUAL window where THIS instance was placed
+   // MT5 creates separate windows automatically, we just need to find ours
    
-   // If ChartWindowOnDropped() returns 0 or -1, try to find by short name
-   if(subwindow <= 0)
+   int subwindow = ChartWindowFind(ChartID(), short_name);
+   Print("📍 ChartWindowFind('", short_name, "') returned: ", subwindow);
+   
+   // If not found yet (rare), try ChartWindowOnDropped as fallback
+   if(subwindow < 0)
    {
-      subwindow = ChartWindowFind(ChartID(), short_name);
-      Print("📍 ChartWindowFind(", short_name, ") returned: ", subwindow);
+      subwindow = ChartWindowOnDropped();
+      Print("📍 Fallback: ChartWindowOnDropped() returned: ", subwindow);
    }
    
-   // CRITICAL: ChartWindowOnDropped() should ALWAYS return correct subwindow for indicator_separate_window
-   // If it still returns 0, something is wrong - this should not happen
+   // Final safety check
    if(subwindow <= 0)
    {
       Print("⚠️ ERROR: Unable to determine indicator subwindow!");
-      Print("   This may cause panel positioning issues.");
-      Print("   Defaulting to subwindow 1 as fallback.");
+      Print("   This will cause panel positioning issues.");
+      Print("   Defaulting to subwindow 1 as last resort.");
       subwindow = 1;
    }
    
