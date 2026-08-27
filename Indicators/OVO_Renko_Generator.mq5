@@ -244,14 +244,43 @@ void OnTimer()
    // ✅ FIRST: Check if we need to create the panel (deferred from OnInit)
    if(g_state == STATE_INITIALIZING && g_panel == NULL)
    {
-      // Now the indicator window should be fully created
-      // Reconstruct short name (same as set in OnInit)
+      // Try multiple methods to find our indicator window
+      // Method 1: Search by short name
       string short_name = StringFormat("OVO Renko [%s] %s", 
                                         g_config.period_token,
                                         (InpChartType == RENKO_MEAN ? "Mean" : "Regular"));
       int subwindow = ChartWindowFind(ChartID(), short_name);
       
-      Print("📍 [OnTimer] ChartWindowFind('", short_name, "') returned: ", subwindow);
+      // Method 2: If not found, try without space after bracket
+      if(subwindow < 0)
+      {
+         string alt_name = StringFormat("OVO Renko [%s]%s", 
+                                         g_config.period_token,
+                                         (InpChartType == RENKO_MEAN ? "Mean" : "Regular"));
+         subwindow = ChartWindowFind(ChartID(), alt_name);
+      }
+      
+      // Method 3: Iterate through all windows to find ours
+      if(subwindow < 0)
+      {
+         int total_windows = (int)ChartGetInteger(ChartID(), CHART_WINDOWS_TOTAL);
+         Print("📊 Total chart windows: ", total_windows);
+         
+         for(int i = 1; i < total_windows; i++)  // Start from 1 (skip main chart)
+         {
+            // Check if this window belongs to our indicator by trying to create a test object
+            string test_name = StringFormat("Test_%s_%d", g_config.period_token, i);
+            if(ObjectCreate(ChartID(), test_name, OBJ_LABEL, i, 0, 0))
+            {
+               ObjectDelete(ChartID(), test_name);
+               subwindow = i;
+               Print("✅ Found available window by iteration: ", i);
+               break;
+            }
+         }
+      }
+      
+      Print("📍 [OnTimer] Final subwindow: ", subwindow);
       
       if(subwindow > 0)
       {
@@ -285,7 +314,10 @@ void OnTimer()
       }
       else
       {
-         Print("⏳ Waiting for indicator window to be created...");
+         static int wait_count = 0;
+         wait_count++;
+         if(wait_count % 10 == 0)  // Log every 10 attempts
+            Print("⏳ Still waiting for indicator window... (attempt ", wait_count, ")");
       }
       
       return;  // Don't process other states yet
