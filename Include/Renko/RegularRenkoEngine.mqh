@@ -349,8 +349,16 @@ public:
       m_prev_body_close = brick.close;
       
       if(m_verbose)
-         Print("Completed ", (direction > 0 ? "UP" : "DOWN"), " brick: ",
-               brick.open, " -> ", brick.close, " time: ", TimeToString(brick.time));
+      {
+         Print("=== Completed ", (direction > 0 ? "UP" : "DOWN"), " brick ===");
+         Print("  Time: ", TimeToString(brick.time));
+         Print("  Open: ", brick.open);
+         Print("  High: ", brick.high);
+         Print("  Low: ", brick.low);
+         Print("  Close: ", brick.close);
+         Print("  Body: ", MathAbs(brick.close - brick.open));
+         Print("  Volume: ", brick.tick_volume);
+      }
    }
    
    //--- Get completed bricks
