@@ -10,8 +10,10 @@
 #property description "Synchronous history build, instant completion"
 #property indicator_separate_window
 #property indicator_height 30
-#property indicator_plots   0
-#property indicator_buffers 0
+#property indicator_plots   1
+#property indicator_buffers 1
+#property indicator_type1   DRAW_NONE
+#property indicator_color1  clrNONE
 
 //--- Include all components
 #include "../Include/Renko/RenkoTypes.mqh"
@@ -65,6 +67,9 @@ ENUM_RENKO_STATE g_state = STATE_INITIALIZING;
 RenkoConfig g_config;
 PersistenceState g_persistence;
 
+// Dummy buffer to force separate window (MT5 requirement)
+double g_dummy_buffer[];
+
 // Core components
 CTickIntegrityLayer* g_tick_integrity = NULL;
 CRegularRenkoEngine* g_regular_engine = NULL;
@@ -94,6 +99,10 @@ bool g_explicit_button_click = false;
 int OnInit()
 {
    Print("=== OVO Renko Generator V3.0 Initializing ===");
+   
+   // ✅ CRITICAL: Set buffer binding to force separate window creation
+   SetIndexBuffer(0, g_dummy_buffer, INDICATOR_DATA);
+   PlotIndexSetInteger(0, PLOT_DRAW_TYPE, DRAW_NONE);
    
    if(!ValidateInputs())
       return INIT_PARAMETERS_INCORRECT;
