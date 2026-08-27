@@ -12,6 +12,9 @@
 #property indicator_height 30
 #property indicator_minimum 0
 #property indicator_maximum 1
+#property indicator_fixed_minimum 0
+#property indicator_fixed_maximum 1
+#property indicator_levelcolor clrNONE
 #property indicator_plots   1
 #property indicator_buffers 1
 #property indicator_type1   DRAW_NONE
@@ -132,35 +135,37 @@ int OnInit()
    
    CreateComponents();
    
-   // ✅ CRITICAL: For indicator_separate_window, objects must be drawn in the indicator's subwindow
-   // Use ChartWindowOnDropped() but ALWAYS ensure it's not 0 (main chart)
+   // ✅ CRITICAL: Set unique short name using auto-assigned period token
+   // This ensures each instance has a unique identifier for window detection
    string short_name = StringFormat("OVO Renko [%s] %s", 
-                                     InpPeriodToken,
+                                     g_config.period_token,  // ✅ Use auto-assigned period
                                      (InpChartType == RENKO_MEAN ? "Mean" : "Regular"));
    IndicatorSetString(INDICATOR_SHORTNAME, short_name);
    
+   // ✅ For indicator_separate_window, ChartWindowOnDropped() returns the subwindow number
+   // Each instance gets its own separate window with incremental numbers (1, 2, 3...)
    int subwindow = ChartWindowOnDropped();
-   Print("ChartWindowOnDropped() returned: ", subwindow);
+   Print("📍 ChartWindowOnDropped() returned: ", subwindow);
    
-   // ✅ For indicator_separate_window, ChartWindowOnDropped() should return the subwindow number
-   // But it may return 0 during OnInit if window isn't created yet
-   // We'll use ChartWindowFind() with our short_name to find the actual window
-   if(subwindow == 0)
-   {
-      // Try to find our indicator window by short name
-      subwindow = ChartWindowFind(ChartID(), short_name);
-      Print("ChartWindowFind() returned: ", subwindow);
-   }
-   
-   // ✅ FORCE to subwindow 1 if still 0 or -1
-   // For indicator_separate_window with a buffer, it WILL be in subwindow 1
+   // If ChartWindowOnDropped() returns 0 or -1, try to find by short name
    if(subwindow <= 0)
    {
+      subwindow = ChartWindowFind(ChartID(), short_name);
+      Print("📍 ChartWindowFind(", short_name, ") returned: ", subwindow);
+   }
+   
+   // CRITICAL: ChartWindowOnDropped() should ALWAYS return correct subwindow for indicator_separate_window
+   // If it still returns 0, something is wrong - this should not happen
+   if(subwindow <= 0)
+   {
+      Print("⚠️ ERROR: Unable to determine indicator subwindow!");
+      Print("   This may cause panel positioning issues.");
+      Print("   Defaulting to subwindow 1 as fallback.");
       subwindow = 1;
-      Print("⚠️ Forcing subwindow to 1 (indicator window - will be created)");
    }
    
    Print("✅ Using subwindow: ", subwindow, " for panel objects");
+   Print("   Short name: ", short_name);
    
    g_state = STATE_PANEL_ONLY;
    
