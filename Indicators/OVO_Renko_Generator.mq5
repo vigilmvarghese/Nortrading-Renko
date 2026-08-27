@@ -165,19 +165,10 @@ int OnInit()
    Print("   Unique ID: ", g_unique_name);
    Print("   Panel will be created after window is ready...");
    
-   // ✅ CRITICAL: Only auto-resume if the session was PREVIOUSLY ACTIVE (STATE_LIVE)
-   // This means user had already generated a chart before MT5 closed
-   // On first attach (is_active = false), we wait for user to click the button
-   if(has_saved_state && g_persistence.is_active && InpAutoResume)
-   {
-      Print("🔄 Auto-resuming previous session (MT5 was restarted while chart was live)...");
-      g_explicit_button_click = false;  // Not a manual click
-      g_rebuild_requested = true;       // Trigger rebuild
-   }
-   else
-   {
-      Print("⏸️ First attach or inactive session - waiting for user to click button");
-   }
+   // ✅ DISABLED AUTO-RESUME FOR NOW
+   // Fresh attach always waits for user to click button
+   // This prevents auto-generation on every instance attach
+   Print("⏸️ Waiting for user to click the period button to generate chart");
    
    return INIT_SUCCEEDED;
 }
@@ -283,43 +274,56 @@ void OnTimer()
       // Try ChartWindowFind first with the display name
       subwindow = ChartWindowFind(ChartID(), "OVO_Renko_Generator");
       
-      if(subwindow < 0)
+      if(subwindow > 0)
+      {
+         Print("📊 ChartWindowFind returned: ", subwindow);
+      }
+      
+      if(subwindow < 0 || subwindow == 0)
       {
          // If that doesn't work, iterate through windows and test object creation
          // with our unique prefix to find an unclaimed window
          int total_windows = (int)ChartGetInteger(ChartID(), CHART_WINDOWS_TOTAL);
+         Print("📊 Total windows on chart: ", total_windows);
          
          for(int w = 1; w < total_windows; w++)
          {
+            Print("   Checking window ", w, "...");
+            
             // Try to create a marker object with our unique name
             string marker = g_unique_name + "_marker";
             
             // Check if our marker already exists in this window (we already claimed it)
-            if(ObjectFind(ChartID(), marker) == w)
+            int marker_window = ObjectFind(ChartID(), marker);
+            if(marker_window == w)
             {
                subwindow = w;
-               Print("📊 Found our claimed window: ", w);
+               Print("   ✅ Found our marker in window ", w);
                break;
             }
             
             // Check if window is unclaimed by trying to find any of our objects
             string test_bg = StringFormat("OVORenko_%I64d_%s_BG", ChartID(), g_config.period_token);
-            if(ObjectFind(ChartID(), test_bg) == w)
+            int bg_window = ObjectFind(ChartID(), test_bg);
+            if(bg_window == w)
             {
                // We already have a panel in this window
                subwindow = w;
-               Print("📊 Found our panel in window: ", w);
+               Print("   ✅ Found our panel objects in window ", w);
                break;
             }
             
             // Check if this window is empty (no other instance's marker)
             bool window_free = true;
-            for(int i = ObjectsTotal(ChartID(), w, OBJ_LABEL); i >= 0; i--)
+            int total_objects = ObjectsTotal(ChartID(), w, -1);  // All objects in window
+            
+            for(int i = 0; i < total_objects; i++)
             {
-               string obj_name = ObjectName(ChartID(), i, w, OBJ_LABEL);
+               string obj_name = ObjectName(ChartID(), i, w, -1);
                if(StringFind(obj_name, "_marker") >= 0 && StringFind(obj_name, g_unique_name) < 0)
                {
                   // Another instance's marker found
+                  Print("   ⚠️ Window ", w, " has another marker: ", obj_name);
                   window_free = false;
                   break;
                }
@@ -333,20 +337,24 @@ void OnTimer()
                   ObjectSetInteger(ChartID(), marker, OBJPROP_HIDDEN, true);
                   ObjectSetString(ChartID(), marker, OBJPROP_TEXT, g_unique_name);
                   subwindow = w;
-                  Print("📊 Claimed free window: ", w, " with marker: ", marker);
+                  Print("   ✅ Claimed free window: ", w, " with marker: ", marker);
                   break;
+               }
+               else
+               {
+                  Print("   ❌ Failed to create marker in window ", w, ", error: ", GetLastError());
                }
             }
          }
       }
       
-      if(subwindow < 0)
+      if(subwindow < 0 || subwindow == 0)
       {
          // Window not found yet - MT5 may still be creating it
          static int wait_count = 0;
          wait_count++;
          if(wait_count % 10 == 0)  // Log every 10 attempts
-            Print("⏳ Waiting for indicator window... (attempt ", wait_count, ")");
+            Print("⏳ Waiting for indicator window... (attempt ", wait_count, ", unique_name: ", g_unique_name, ")");
          return;  // Try again on next timer tick
       }
       
@@ -969,6 +977,8 @@ void OnPeriodButtonClick()
 //+------------------------------------------------------------------+
 //| Close button click handler                                       |
 //+------------------------------------------------------------------+
+//| Close button click handler                                       |
+//+------------------------------------------------------------------+
 void OnCloseButtonClick()
 {
    Print("Close button clicked - removing indicator");
@@ -976,14 +986,13 @@ void OnCloseButtonClick()
    g_persistence.is_active = false;
    g_persistence.Save();
    
-   string short_name = StringFormat("OVO Renko [%s] %s", 
-                                     g_config.period_token,
-                                     (InpChartType == RENKO_MEAN ? "Mean" : "Regular"));
+   // ✅ Use the actual indicator name (not the old formatted name)
+   string indicator_name = "OVO_Renko_Generator";
    
    // Use our tracked subwindow number
    if(g_our_subwindow > 0)
    {
-      if(ChartIndicatorDelete(ChartID(), g_our_subwindow, short_name))
+      if(ChartIndicatorDelete(ChartID(), g_our_subwindow, indicator_name))
       {
          Print("✅ Indicator removed successfully from subwindow ", g_our_subwindow);
          return;
@@ -991,10 +1000,10 @@ void OnCloseButtonClick()
    }
    
    // Fallback: Try by window search
-   int window = ChartWindowFind(ChartID(), short_name);
+   int window = ChartWindowFind(ChartID(), indicator_name);
    if(window >= 0)
    {
-      if(ChartIndicatorDelete(ChartID(), window, short_name))
+      if(ChartIndicatorDelete(ChartID(), window, indicator_name))
       {
          Print("✅ Indicator removed successfully from window ", window);
          return;
