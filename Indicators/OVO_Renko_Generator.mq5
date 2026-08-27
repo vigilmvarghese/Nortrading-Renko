@@ -243,7 +243,10 @@ void OnTimer()
    if(g_state == STATE_INITIALIZING && g_panel == NULL)
    {
       // Now the indicator window should be fully created
-      string short_name = IndicatorShortName();
+      // Reconstruct short name (same as set in OnInit)
+      string short_name = StringFormat("OVO Renko [%s] %s", 
+                                        g_config.period_token,
+                                        (InpChartType == RENKO_MEAN ? "Mean" : "Regular"));
       int subwindow = ChartWindowFind(ChartID(), short_name);
       
       Print("📍 [OnTimer] ChartWindowFind('", short_name, "') returned: ", subwindow);
