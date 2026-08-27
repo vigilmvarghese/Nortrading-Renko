@@ -142,12 +142,22 @@ int OnInit()
    int subwindow = ChartWindowOnDropped();
    Print("ChartWindowOnDropped() returned: ", subwindow);
    
-   // ✅ FORCE to subwindow 1 if returned 0 or -1
-   // For indicator_separate_window, we MUST draw in subwindow 1+, never 0
+   // ✅ For indicator_separate_window, ChartWindowOnDropped() should return the subwindow number
+   // But it may return 0 during OnInit if window isn't created yet
+   // We'll use ChartWindowFind() with our short_name to find the actual window
+   if(subwindow == 0)
+   {
+      // Try to find our indicator window by short name
+      subwindow = ChartWindowFind(ChartID(), short_name);
+      Print("ChartWindowFind() returned: ", subwindow);
+   }
+   
+   // ✅ FORCE to subwindow 1 if still 0 or -1
+   // For indicator_separate_window with a buffer, it WILL be in subwindow 1
    if(subwindow <= 0)
    {
       subwindow = 1;
-      Print("⚠️ Forcing subwindow to 1 (indicator window)");
+      Print("⚠️ Forcing subwindow to 1 (indicator window - will be created)");
    }
    
    Print("✅ Using subwindow: ", subwindow, " for panel objects");
