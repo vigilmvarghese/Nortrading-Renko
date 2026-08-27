@@ -175,7 +175,24 @@ int OnInit()
    g_panel.SetBrickSize(DoubleToString(InpBrickSizePoints, 0));  // ✅ Uses actual input setting
    g_panel.SetPeriodText(g_config.period_token);  // ✅ Show auto-assigned period
    g_panel.SetStatusText("Ready");
-   g_panel.CreatePanel();
+   
+   Print("🎨 Creating panel with:");
+   Print("   Chart ID: ", ChartID());
+   Print("   Subwindow: ", subwindow);
+   Print("   Prefix: ", unique_prefix);
+   Print("   Chart Type: ", (InpChartType == RENKO_MEAN ? "Mean Renko" : "Regular Renko"));
+   Print("   Period: ", g_config.period_token);
+   
+   bool panel_created = g_panel.CreatePanel();
+   
+   if(!panel_created)
+   {
+      Print("❌ ERROR: Panel creation failed!");
+   }
+   else
+   {
+      Print("✅ Panel created successfully in subwindow ", subwindow);
+   }
    
    int timer_ms = MathMax(InpLivePumpMs, 5);
    EventSetMillisecondTimer(timer_ms);
