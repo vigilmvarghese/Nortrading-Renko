@@ -87,6 +87,9 @@ CTradeOverlay* g_trade_overlay = NULL;
 // Track our subwindow number
 int g_our_subwindow = -1;
 
+// Unique identifier for this instance (includes period token)
+string g_unique_name = "";
+
 // Timers
 int g_live_pump_timer = 0;
 datetime g_last_ui_update = 0;
@@ -138,12 +141,13 @@ int OnInit()
    
    CreateComponents();
    
-   // ✅ CRITICAL: Set unique short name using auto-assigned period token
-   // This ensures each instance has a unique identifier for window detection
-   string short_name = StringFormat("OVO Renko [%s] %s", 
-                                     g_config.period_token,  // ✅ Use auto-assigned period
-                                     (InpChartType == RENKO_MEAN ? "Mean" : "Regular"));
-   IndicatorSetString(INDICATOR_SHORTNAME, short_name);
+   // ✅ Set a simple display name for the indicator list
+   IndicatorSetString(INDICATOR_SHORTNAME, "OVO_Renko_Generator");
+   
+   // ✅ Store unique identifier for internal use (includes period token)
+   g_unique_name = StringFormat("OVO_Renko_%s_%s", 
+                                 g_config.period_token,
+                                 (InpChartType == RENKO_MEAN ? "Mean" : "Regular"));
    
    // ✅ IMPORTANT: Panel creation is deferred to OnTimer
    // During OnInit, the indicator window may not be fully created yet
@@ -157,7 +161,8 @@ int OnInit()
    Print("✅ Indicator initialized");
    Print("   Period: ", g_config.period_token, " (auto-assigned)");
    Print("   Type: ", (InpChartType == RENKO_MEAN ? "Mean Renko" : "Regular Renko"));
-   Print("   Short name: ", short_name);
+   Print("   Display name: OVO_Renko_Generator");
+   Print("   Unique ID: ", g_unique_name);
    Print("   Panel will be created after window is ready...");
    
    // ✅ CRITICAL: Only auto-resume if the session was PREVIOUSLY ACTIVE (STATE_LIVE)
@@ -261,13 +266,71 @@ void OnTimer()
    // ✅ FIRST: Check if we need to create the panel (deferred from OnInit)
    if(g_state == STATE_INITIALIZING && g_panel == NULL)
    {
-      // ✅ OVO PATTERN: Find our subwindow by the indicator's unique short name
-      // Each instance has a unique short name set in OnInit (includes period token)
-      string short_name = StringFormat("OVO Renko [%s] %s", 
-                                        g_config.period_token,
-                                        (InpChartType == RENKO_MEAN ? "Mean" : "Regular"));
+      // ✅ Find our subwindow - MT5 assigns windows in order
+      // First instance gets window 1, second gets window 2, etc.
+      // We need to find which window THIS instance is in
       
-      int subwindow = ChartWindowFind(ChartID(), short_name);
+      int subwindow = -1;
+      
+      // Try ChartWindowFind first with the display name
+      subwindow = ChartWindowFind(ChartID(), "OVO_Renko_Generator");
+      
+      if(subwindow < 0)
+      {
+         // If that doesn't work, iterate through windows and test object creation
+         // with our unique prefix to find an unclaimed window
+         int total_windows = (int)ChartGetInteger(ChartID(), CHART_WINDOWS_TOTAL);
+         
+         for(int w = 1; w < total_windows; w++)
+         {
+            // Try to create a marker object with our unique name
+            string marker = g_unique_name + "_marker";
+            
+            // Check if our marker already exists in this window (we already claimed it)
+            if(ObjectFind(ChartID(), marker) == w)
+            {
+               subwindow = w;
+               Print("📊 Found our claimed window: ", w);
+               break;
+            }
+            
+            // Check if window is unclaimed by trying to find any of our objects
+            string test_bg = StringFormat("OVORenko_%I64d_%s_BG", ChartID(), g_config.period_token);
+            if(ObjectFind(ChartID(), test_bg) == w)
+            {
+               // We already have a panel in this window
+               subwindow = w;
+               Print("📊 Found our panel in window: ", w);
+               break;
+            }
+            
+            // Check if this window is empty (no other instance's marker)
+            bool window_free = true;
+            for(int i = ObjectsTotal(ChartID(), w, OBJ_LABEL); i >= 0; i--)
+            {
+               string obj_name = ObjectName(ChartID(), i, w, OBJ_LABEL);
+               if(StringFind(obj_name, "_marker") >= 0 && StringFind(obj_name, g_unique_name) < 0)
+               {
+                  // Another instance's marker found
+                  window_free = false;
+                  break;
+               }
+            }
+            
+            if(window_free)
+            {
+               // This window is free - claim it
+               if(ObjectCreate(ChartID(), marker, OBJ_LABEL, w, 0, 0))
+               {
+                  ObjectSetInteger(ChartID(), marker, OBJPROP_HIDDEN, true);
+                  ObjectSetString(ChartID(), marker, OBJPROP_TEXT, g_unique_name);
+                  subwindow = w;
+                  Print("📊 Claimed free window: ", w, " with marker: ", marker);
+                  break;
+               }
+            }
+         }
+      }
       
       if(subwindow < 0)
       {
@@ -279,20 +342,7 @@ void OnTimer()
          return;  // Try again on next timer tick
       }
       
-      Print("📊 Found our subwindow: ", subwindow, " (by name: ", short_name, ")");
-      
-      // ✅ Verify we can create objects in this window
-      string test_name = StringFormat("Test_%s_%I64d", g_config.period_token, ChartID());
-      if(ObjectCreate(ChartID(), test_name, OBJ_LABEL, subwindow, 0, 0))
-      {
-         ObjectDelete(ChartID(), test_name);
-         Print("✅ Verified window ", subwindow, " is accessible");
-      }
-      else
-      {
-         Print("❌ Cannot create objects in window ", subwindow);
-         return;
-      }
+      Print("📊 Using subwindow: ", subwindow, " for ", g_unique_name);
       
       if(subwindow > 0)
       {
