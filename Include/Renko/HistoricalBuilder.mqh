@@ -41,12 +41,17 @@ private:
    RenkoBrick        m_result_bricks[];        // Result bricks
    int               m_result_count;           // Result count
    
+   //--- Persistent engines for incremental build
+   CRegularRenkoEngine* m_regular_engine;      // Regular Renko engine
+   CMeanRenkoEngine*    m_mean_engine;         // Mean Renko engine
+   
 public:
    //--- Constructor
    CHistoricalBuilder(string symbol = "", bool verbose = false)
       : m_symbol(symbol), m_verbose(verbose), m_cache_size(0), 
         m_cache_enabled(true), m_is_building(false), m_build_index(0),
-        m_total_ticks(0), m_budget_ms(8), m_result_count(0)
+        m_total_ticks(0), m_budget_ms(8), m_result_count(0),
+        m_regular_engine(NULL), m_mean_engine(NULL)
    {
       if(m_symbol == "")
          m_symbol = _Symbol;
@@ -56,7 +61,19 @@ public:
    }
    
    //--- Destructor
-   ~CHistoricalBuilder() {}
+   ~CHistoricalBuilder()
+   {
+      if(m_regular_engine != NULL)
+      {
+         delete m_regular_engine;
+         m_regular_engine = NULL;
+      }
+      if(m_mean_engine != NULL)
+      {
+         delete m_mean_engine;
+         m_mean_engine = NULL;
+      }
+   }
    
    //--- Load ticks into cache
    bool LoadTickCache(int history_days)
@@ -142,6 +159,30 @@ public:
       if(m_is_building)
          return false;
       
+      // Clean up old engines
+      if(m_regular_engine != NULL)
+      {
+         delete m_regular_engine;
+         m_regular_engine = NULL;
+      }
+      if(m_mean_engine != NULL)
+      {
+         delete m_mean_engine;
+         m_mean_engine = NULL;
+      }
+      
+      // Create persistent engine for this build
+      if(type == RENKO_REGULAR)
+      {
+         m_regular_engine = new CRegularRenkoEngine(m_symbol, m_verbose);
+         m_regular_engine.Configure(brick_size_points, suppress_wicks);
+      }
+      else if(type == RENKO_MEAN)
+      {
+         m_mean_engine = new CMeanRenkoEngine(m_symbol, m_verbose);
+         m_mean_engine.Configure(brick_size_points, suppress_wicks);
+      }
+      
       // Load tick cache if enabled
       if(m_cache_enabled)
       {
@@ -191,20 +232,8 @@ public:
       uint start_time = GetTickCount();
       int ticks_processed = 0;
       
-      // Create temporary engine for this pass
-      CRegularRenkoEngine* regular_engine = NULL;
-      CMeanRenkoEngine* mean_engine = NULL;
-      
-      if(type == RENKO_REGULAR)
-      {
-         regular_engine = new CRegularRenkoEngine(m_symbol, false);
-         regular_engine.Configure(brick_size_points, suppress_wicks);
-      }
-      else
-      {
-         mean_engine = new CMeanRenkoEngine(m_symbol, false);
-         mean_engine.Configure(brick_size_points, suppress_wicks);
-      }
+      // ✅ FIX: Use PERSISTENT engine, don't recreate each pass
+      // Engines are created in StartBuild and maintained throughout
       
       // Process ticks within time budget
       while(m_build_index < m_total_ticks)
@@ -216,10 +245,10 @@ public:
          {
             ENUM_DIRTY_STATE dirty = DIRTY_NONE;
             
-            if(type == RENKO_REGULAR && regular_engine != NULL)
-               dirty = regular_engine.ProcessTick(price, tick.time);
-            else if(type == RENKO_MEAN && mean_engine != NULL)
-               dirty = mean_engine.ProcessTick(price, tick.time);
+            if(type == RENKO_REGULAR && m_regular_engine != NULL)
+               dirty = m_regular_engine.ProcessTick(price, tick.time);
+            else if(type == RENKO_MEAN && m_mean_engine != NULL)
+               dirty = m_mean_engine.ProcessTick(price, tick.time);
             
             // Collect completed bricks
             if(dirty == DIRTY_BRICK_COMPLETED || dirty == DIRTY_MULTI_BRICK_COMPLETED)
@@ -227,10 +256,10 @@ public:
                RenkoBrick completed[];
                int count = 0;
                
-               if(type == RENKO_REGULAR && regular_engine != NULL)
-                  count = regular_engine.GetCompletedBricks(completed);
-               else if(type == RENKO_MEAN && mean_engine != NULL)
-                  count = mean_engine.GetCompletedBricks(completed);
+               if(type == RENKO_REGULAR && m_regular_engine != NULL)
+                  count = m_regular_engine.GetCompletedBricks(completed);
+               else if(type == RENKO_MEAN && m_mean_engine != NULL)
+                  count = m_mean_engine.GetCompletedBricks(completed);
                
                // Add to results
                if(count > 0)
@@ -256,12 +285,6 @@ public:
          if(elapsed >= (uint)m_budget_ms)
             break;
       }
-      
-      // Clean up
-      if(regular_engine != NULL)
-         delete regular_engine;
-      if(mean_engine != NULL)
-         delete mean_engine;
       
       // Check if finished
       if(m_build_index >= m_total_ticks)
