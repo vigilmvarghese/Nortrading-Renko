@@ -84,6 +84,9 @@ CChartManager* g_chart_manager = NULL;
 CPanelUI* g_panel = NULL;
 CTradeOverlay* g_trade_overlay = NULL;
 
+// Track our subwindow number
+int g_our_subwindow = -1;
+
 // Timers
 int g_live_pump_timer = 0;
 datetime g_last_ui_update = 0;
@@ -202,13 +205,19 @@ void OnDeinit(const int reason)
    }
    
    EventKillTimer();
-   DestroyComponents();
    
+   // ✅ Clean up panel objects first
    if(g_panel != NULL)
    {
-      delete g_panel;
+      delete g_panel;  // Destructor calls DeletePanel()
       g_panel = NULL;
    }
+   
+   // ✅ Force delete any remaining objects with our prefix
+   string prefix = StringFormat("OVORenko_%I64d_%s_", ChartID(), g_config.period_token);
+   ObjectsDeleteAll(ChartID(), prefix, g_our_subwindow, OBJ_ALL);
+   
+   DestroyComponents();
    
    Print("Deinitialization complete");
 }
@@ -282,6 +291,9 @@ void OnTimer()
          g_panel.SetBrickSize(DoubleToString(InpBrickSizePoints, 0));
          g_panel.SetPeriodText(g_config.period_token);
          g_panel.SetStatusText("Ready");
+         
+         // ✅ Save our subwindow number for later use
+         g_our_subwindow = subwindow;
          
          Print("🎨 Creating panel with:");
          Print("   Chart ID: ", ChartID());
@@ -878,7 +890,32 @@ void OnCloseButtonClick()
    g_persistence.is_active = false;
    g_persistence.Save();
    
-   ChartIndicatorDelete(ChartID(), 0, "OVO_Renko_Generator");
+   string short_name = StringFormat("OVO Renko [%s] %s", 
+                                     g_config.period_token,
+                                     (InpChartType == RENKO_MEAN ? "Mean" : "Regular"));
+   
+   // Use our tracked subwindow number
+   if(g_our_subwindow > 0)
+   {
+      if(ChartIndicatorDelete(ChartID(), g_our_subwindow, short_name))
+      {
+         Print("✅ Indicator removed successfully from subwindow ", g_our_subwindow);
+         return;
+      }
+   }
+   
+   // Fallback: Try by window search
+   int window = ChartWindowFind(ChartID(), short_name);
+   if(window >= 0)
+   {
+      if(ChartIndicatorDelete(ChartID(), window, short_name))
+      {
+         Print("✅ Indicator removed successfully from window ", window);
+         return;
+      }
+   }
+   
+   Print("⚠️ Could not remove indicator automatically - please use Indicators List");
 }
 
 //+------------------------------------------------------------------+
