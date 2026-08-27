@@ -373,7 +373,11 @@ string FindNextAvailablePeriodToken(string source_symbol)
       string test_symbol = source_symbol + "." + test_period;
       
       // Check if this custom symbol already exists
-      if(!SymbolExist(test_symbol, true))  // true = check custom symbols
+      // Try to get symbol info - if it fails, symbol doesn't exist
+      long dummy;
+      bool symbol_exists = SymbolInfoInteger(test_symbol, SYMBOL_CUSTOM, dummy);
+      
+      if(!symbol_exists)
       {
          Print("✅ Auto-assigned period token: ", test_period, " (custom symbol: ", test_symbol, ")");
          return test_period;
