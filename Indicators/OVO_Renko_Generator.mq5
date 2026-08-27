@@ -48,7 +48,8 @@ input bool InpEnableTickCache = true;                      // Enable Tick Cache
 input int InpTickChunkMinutes = 180;                       // Tick load chunk size (minutes)
 
 input group "=== PERSISTENCE ==="
-input bool InpAutoResume = true;                           // Auto Resume After MT5 Restart
+// ❌ Auto-resume disabled - user must explicitly click button to generate chart
+// input bool InpAutoResume = true;                           // Auto Resume After MT5 Restart
 input bool InpPreserveChartSetup = true;                   // Preserve Generated Chart Setup
 
 input group "=== TRADE DISPLAY ==="
@@ -107,24 +108,27 @@ int OnInit()
    g_persistence.chart_type = InpChartType;
    g_persistence.brick_size = InpBrickSizePoints;
    
+   // ❌ Auto-resume disabled
+   /*
    if(InpAutoResume)
    {
       if(g_persistence.Load())
          Print("Loaded persistence state - will auto-resume");
    }
+   */
    
    CreateComponents();
    
    // ✅ Create panel in SEPARATE SUBWINDOW (indicator window)
-   // Find subwindow number dynamically
    string short_name = StringFormat("OVO Renko [%s] %s", 
                                      InpPeriodToken,
                                      (InpChartType == RENKO_MEAN ? "Mean" : "Regular"));
    IndicatorSetString(INDICATOR_SHORTNAME, short_name);
    
-   // Panel will be in subwindow (not chart window)
-   int subwindow = ChartWindowFind(ChartID(), short_name);
-   if(subwindow < 0) subwindow = 0;  // Safety fallback
+   // ✅ CRITICAL: In indicator_separate_window mode, the panel MUST be created in window 1 (first subwindow)
+   // Window 0 = main chart, Window 1 = first indicator subwindow
+   // ChartWindowFind() returns -1 during OnInit, so we hardcode window 1
+   int subwindow = 1;  // ✅ First indicator subwindow (not main chart!)
    
    g_state = STATE_PANEL_ONLY;
    
@@ -142,17 +146,21 @@ int OnInit()
    EventSetMillisecondTimer(timer_ms);
    g_live_pump_timer = timer_ms;
    
-   Print("✅ Indicator initialized in SEPARATE WINDOW");
+   Print("✅ Indicator initialized in SEPARATE WINDOW #1");
    Print("   Period: ", InpPeriodToken);
    Print("   Type: ", (InpChartType == RENKO_MEAN ? "Mean Renko" : "Regular Renko"));
    Print("   Click period button to generate chart");
    
+   // ✅ DISABLED auto-resume to prevent automatic generation on attach
+   // User must explicitly click the period button to generate chart
+   /*
    if(InpAutoResume && g_persistence.is_active)
    {
       Print("Auto-resuming previous session...");
       g_explicit_button_click = false;
       g_rebuild_requested = true;
    }
+   */
    
    return INIT_SUCCEEDED;
 }
