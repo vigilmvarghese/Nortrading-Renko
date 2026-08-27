@@ -218,6 +218,14 @@ void OnDeinit(const int reason)
       g_panel = NULL;
    }
    
+   // ✅ Delete our marker object to free up the period token for reuse
+   string marker = g_unique_name + "_marker";
+   if(ObjectFind(ChartID(), marker) >= 0)
+   {
+      ObjectDelete(ChartID(), marker);
+      Print("✅ Released period token ", g_config.period_token, " (deleted marker)");
+   }
+   
    // ✅ Force delete any remaining objects with our prefix
    string prefix = StringFormat("OVORenko_%I64d_%s_", ChartID(), g_config.period_token);
    ObjectsDeleteAll(ChartID(), prefix, g_our_subwindow, -1);  // -1 = all object types
@@ -485,6 +493,9 @@ bool ValidateInputs()
 //+------------------------------------------------------------------+
 //| Find next available period token for this symbol                |
 //+------------------------------------------------------------------+
+//| Find next available period token for this symbol                |
+//| Checks for active indicator instances on chart (not custom symbols) |
+//+------------------------------------------------------------------+
 string FindNextAvailablePeriodToken(string source_symbol)
 {
    // Extract base period (M or any prefix) from InpPeriodToken
@@ -503,27 +514,46 @@ string FindNextAvailablePeriodToken(string source_symbol)
    
    if(base_period == "") base_period = "M";  // Default to M if no prefix found
    
-   // Check existing custom symbols to find next available number
-   int max_number = 60;  // Start from M61 by default
+   // ✅ NEW APPROACH: Check for active indicator instances on THIS CHART
+   // by looking for marker objects (more reliable than checking custom symbols)
    
    for(int num = 61; num <= 99; num++)
    {
       string test_period = base_period + IntegerToString(num);
-      string test_symbol = source_symbol + "." + test_period;
       
-      // Check if this custom symbol already exists
-      // Try to get symbol info - if it fails, symbol doesn't exist
-      long dummy;
-      bool symbol_exists = SymbolInfoInteger(test_symbol, SYMBOL_CUSTOM, dummy);
+      // Check if any instance on this chart is using this period token
+      // by looking for marker objects
+      bool token_in_use = false;
       
-      if(!symbol_exists)
+      // Search all windows for markers with this period token
+      int total_windows = (int)ChartGetInteger(ChartID(), CHART_WINDOWS_TOTAL);
+      for(int w = 0; w < total_windows; w++)
       {
-         Print("✅ Auto-assigned period token: ", test_period, " (custom symbol: ", test_symbol, ")");
+         // Check for Mean Renko marker
+         string mean_marker = StringFormat("OVO_Renko_%s_Mean_marker", test_period);
+         if(ObjectFind(ChartID(), mean_marker) >= 0)
+         {
+            token_in_use = true;
+            break;
+         }
+         
+         // Check for Regular Renko marker
+         string regular_marker = StringFormat("OVO_Renko_%s_Regular_marker", test_period);
+         if(ObjectFind(ChartID(), regular_marker) >= 0)
+         {
+            token_in_use = true;
+            break;
+         }
+      }
+      
+      if(!token_in_use)
+      {
+         Print("✅ Auto-assigned period token: ", test_period, " (available slot on chart)");
          return test_period;
       }
       else
       {
-         Print("⚠️ Period token ", test_period, " already in use (", test_symbol, " exists)");
+         Print("⚠️ Period token ", test_period, " in use by active instance");
       }
    }
    
