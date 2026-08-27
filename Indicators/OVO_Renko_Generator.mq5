@@ -83,6 +83,7 @@ datetime g_last_chart_check = 0;
 double g_runtime_brick_size = 0;
 bool g_rebuild_requested = false;
 bool g_chart_needs_redraw = false;
+bool g_explicit_button_click = false;  // Track if user explicitly clicked button
 
 //+------------------------------------------------------------------+
 //| Custom indicator initialization                                  |
@@ -138,6 +139,7 @@ int OnInit()
    if(InpAutoResume && g_persistence.is_active)
    {
       Print("Auto-resuming previous session...");
+      g_explicit_button_click = false;  // Auto-resume doesn't switch charts
       g_rebuild_requested = true;
    }
    
@@ -519,9 +521,9 @@ void CompletePublish()
       return;
    }
    
-   // Open/switch to chart
+   // Open/switch to chart (only if explicit button click)
    string custom_symbol = g_publisher.GetCustomSymbolName();
-   long chart_id = g_chart_manager.OpenChart(custom_symbol, true);
+   long chart_id = g_chart_manager.OpenChart(custom_symbol, g_explicit_button_click);
    
    if(chart_id == 0)
    {
@@ -531,6 +533,9 @@ void CompletePublish()
          g_panel.SetStatusText("ERROR: Chart open failed");
       return;
    }
+   
+   // Reset button click flag after opening
+   g_explicit_button_click = false;
    
    // Create trade overlay for Renko chart
    g_trade_overlay = new CTradeOverlay(_Symbol, chart_id, "OVOTrade_", InpVerboseLog);
@@ -706,6 +711,7 @@ void OnPeriodButtonClick()
    
    if(g_state == STATE_PANEL_ONLY || g_state == STATE_LIVE)
    {
+      g_explicit_button_click = true;  // Mark as explicit user action
       g_rebuild_requested = true;
       g_state = STATE_REBUILD_REQUESTED;
    }
