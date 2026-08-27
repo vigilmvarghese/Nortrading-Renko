@@ -187,7 +187,7 @@ void OnDeinit(const int reason)
    if(g_state == STATE_LIVE)
    {
       g_persistence.is_active = true;  // ✅ Chart was active, enable auto-resume
-      g_persistence.chart_id = g_chart_manager != NULL ? g_chart_manager.GetChartID() : 0;
+      g_persistence.chart_id = g_chart_manager != NULL ? g_chart_manager.GetChartId() : 0;
       g_persistence.Save();
       Print("✅ Persistence state saved (is_active = true) - will auto-resume on restart");
    }
