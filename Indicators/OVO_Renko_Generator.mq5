@@ -8,10 +8,7 @@
 #property version   "3.00"
 #property description "MT5 OVO-Style Renko Generator - Exact OVO Implementation"
 #property description "Synchronous history build, instant completion"
-#property indicator_separate_window
-#property indicator_height 30
-#property indicator_minimum 0
-#property indicator_maximum 1
+#property indicator_chart_window
 #property indicator_plots   0
 #property indicator_buffers 0
 
@@ -122,16 +119,16 @@ int OnInit()
    
    CreateComponents();
    
-   // ✅ Create panel in SEPARATE SUBWINDOW (indicator window)
+   // ✅ Create panel on MAIN CHART WINDOW (window 0)
+   // Chart objects (OBJ_LABEL, OBJ_BUTTON, etc.) can ONLY be drawn on chart windows
+   // indicator_separate_window creates a DATA window, not a chart window
+   // So we draw on window 0 (main chart) at bottom corner
    string short_name = StringFormat("OVO Renko [%s] %s", 
                                      InpPeriodToken,
                                      (InpChartType == RENKO_MEAN ? "Mean" : "Regular"));
    IndicatorSetString(INDICATOR_SHORTNAME, short_name);
    
-   // ✅ CRITICAL: In indicator_separate_window mode, the panel MUST be created in window 1 (first subwindow)
-   // Window 0 = main chart, Window 1 = first indicator subwindow
-   // ChartWindowFind() returns -1 during OnInit, so we hardcode window 1
-   int subwindow = 1;  // ✅ First indicator subwindow (not main chart!)
+   int subwindow = 0;  // ✅ Main chart window (ONLY place chart objects can be drawn)
    
    g_state = STATE_PANEL_ONLY;
    
@@ -149,7 +146,7 @@ int OnInit()
    EventSetMillisecondTimer(timer_ms);
    g_live_pump_timer = timer_ms;
    
-   Print("✅ Indicator initialized in SEPARATE WINDOW #1");
+   Print("✅ Indicator initialized on MAIN CHART WINDOW");
    Print("   Period: ", InpPeriodToken);
    Print("   Type: ", (InpChartType == RENKO_MEAN ? "Mean Renko" : "Regular Renko"));
    Print("   Click period button to generate chart");

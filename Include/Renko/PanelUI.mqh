@@ -64,22 +64,26 @@ public:
    void CalculatePositions()
    {
       m_panel_width = (int)ChartGetInteger(m_chart_id, CHART_WIDTH_IN_PIXELS);
+      int chart_height = (int)ChartGetInteger(m_chart_id, CHART_HEIGHT_IN_PIXELS);
+      
+      // Position panel at BOTTOM of chart (chart_height - panel_height)
+      int panel_y_start = chart_height - m_panel_height;
       
       // Left side: label and brick field
       m_brick_field_x = 80;
-      m_brick_field_y = 2;
+      m_brick_field_y = panel_y_start + 2;
       
       // Period button next to brick field
       m_period_button_x = 150;
-      m_period_button_y = 2;
+      m_period_button_y = panel_y_start + 2;
       
       // Center: status
       m_status_x = m_panel_width / 2;
-      m_status_y = 4;
+      m_status_y = panel_y_start + 4;
       
       // Right side: close button
       m_close_button_x = m_panel_width - 30;
-      m_close_button_y = 2;
+      m_close_button_y = panel_y_start + 2;
    }
    
    //--- Create panel
@@ -120,9 +124,12 @@ public:
    {
       string name = m_prefix + "BG";
       
+      int chart_height = (int)ChartGetInteger(m_chart_id, CHART_HEIGHT_IN_PIXELS);
+      int panel_y_start = chart_height - m_panel_height;
+      
       ObjectCreate(m_chart_id, name, OBJ_RECTANGLE_LABEL, m_subwindow, 0, 0);
       ObjectSetInteger(m_chart_id, name, OBJPROP_XDISTANCE, 0);
-      ObjectSetInteger(m_chart_id, name, OBJPROP_YDISTANCE, 0);
+      ObjectSetInteger(m_chart_id, name, OBJPROP_YDISTANCE, panel_y_start);
       ObjectSetInteger(m_chart_id, name, OBJPROP_XSIZE, m_panel_width);
       ObjectSetInteger(m_chart_id, name, OBJPROP_YSIZE, m_panel_height);
       ObjectSetInteger(m_chart_id, name, OBJPROP_BGCOLOR, clrBlack);  // ✅ BLACK background
@@ -138,9 +145,12 @@ public:
       string name = m_prefix + "TypeLabel";
       string text = (m_chart_type == RENKO_REGULAR) ? "Renko:" : "Mean Renko:";
       
+      int chart_height = (int)ChartGetInteger(m_chart_id, CHART_HEIGHT_IN_PIXELS);
+      int panel_y_start = chart_height - m_panel_height;
+      
       ObjectCreate(m_chart_id, name, OBJ_LABEL, m_subwindow, 0, 0);
       ObjectSetInteger(m_chart_id, name, OBJPROP_XDISTANCE, 5);
-      ObjectSetInteger(m_chart_id, name, OBJPROP_YDISTANCE, 4);
+      ObjectSetInteger(m_chart_id, name, OBJPROP_YDISTANCE, panel_y_start + 4);
       ObjectSetInteger(m_chart_id, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
       ObjectSetInteger(m_chart_id, name, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
       ObjectSetString(m_chart_id, name, OBJPROP_TEXT, text);
@@ -245,20 +255,30 @@ public:
       m_visible = false;
    }
    
-   //--- Update panel width
+   //--- Update panel position (handles chart resize)
    void UpdateWidth()
    {
       int new_width = (int)ChartGetInteger(m_chart_id, CHART_WIDTH_IN_PIXELS);
+      int chart_height = (int)ChartGetInteger(m_chart_id, CHART_HEIGHT_IN_PIXELS);
+      int panel_y_start = chart_height - m_panel_height;
       
       if(new_width != m_panel_width)
       {
          m_panel_width = new_width;
          CalculatePositions();
          
-         // Update positions
+         // Update background
          ObjectSetInteger(m_chart_id, m_prefix + "BG", OBJPROP_XSIZE, m_panel_width);
+         ObjectSetInteger(m_chart_id, m_prefix + "BG", OBJPROP_YDISTANCE, panel_y_start);
+         
+         // Update all control positions
+         ObjectSetInteger(m_chart_id, m_prefix + "TypeLabel", OBJPROP_YDISTANCE, panel_y_start + 4);
+         ObjectSetInteger(m_chart_id, m_prefix + "BrickField", OBJPROP_YDISTANCE, m_brick_field_y);
+         ObjectSetInteger(m_chart_id, m_prefix + "PeriodButton", OBJPROP_YDISTANCE, m_period_button_y);
          ObjectSetInteger(m_chart_id, m_prefix + "Status", OBJPROP_XDISTANCE, m_status_x);
+         ObjectSetInteger(m_chart_id, m_prefix + "Status", OBJPROP_YDISTANCE, m_status_y);
          ObjectSetInteger(m_chart_id, m_prefix + "CloseButton", OBJPROP_XDISTANCE, m_close_button_x);
+         ObjectSetInteger(m_chart_id, m_prefix + "CloseButton", OBJPROP_YDISTANCE, m_close_button_y);
       }
    }
    
