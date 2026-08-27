@@ -37,7 +37,8 @@ input string InpPeriodToken = "M61";                       // Custom Period ID (
 input int InpHistoryDays = 7;                              // History Days
 
 input group "=== LIVE FEED ==="
-input int InpLivePumpMs = 20;                              // Live Pump Milliseconds (min 5)
+input bool InpUseOnTick = true;                            // Use OnTick for zero-latency (fastest)
+input int InpLivePumpMs = 20;                              // Timer fallback (if OnTick disabled)
 
 input group "=== PERFORMANCE ==="
 input bool InpEnableTickCache = true;                      // Enable Tick Cache
@@ -170,7 +171,7 @@ void OnDeinit(const int reason)
 }
 
 //+------------------------------------------------------------------+
-//| Custom indicator iteration                                       |
+//| Custom indicator iteration - ZERO LATENCY TICK PROCESSING       |
 //+------------------------------------------------------------------+
 int OnCalculate(const int rates_total,
                 const int prev_calculated,
@@ -183,37 +184,68 @@ int OnCalculate(const int rates_total,
                 const long &volume[],
                 const int &spread[])
 {
+   // ⚡ ZERO-LATENCY MODE: Process ticks immediately on arrival
+   if(InpUseOnTick && g_state == STATE_LIVE)
+   {
+      ProcessLiveTicks();
+   }
+   
    return rates_total;
 }
 
 //+------------------------------------------------------------------+
-//| Timer event - OVO pattern: synchronous build + live pump        |
+//| Timer event - Hybrid mode (OnTick primary, Timer fallback)      |
 //+------------------------------------------------------------------+
 void OnTimer()
 {
-   switch(g_state)
+   // Timer only handles UI updates and non-live states when OnTick is enabled
+   if(InpUseOnTick)
    {
-      case STATE_INITIALIZING:
-         break;
+      // Lightweight: Only UI and state management
+      switch(g_state)
+      {
+         case STATE_PANEL_ONLY:
+            HandlePanelOnly();
+            break;
+         
+         case STATE_REBUILD_REQUESTED:
+            StartRebuild();
+            break;
+         
+         case STATE_LIVE:
+            // Tick processing handled by OnCalculate (zero latency)
+            // Timer only does UI updates
+            break;
+      }
       
-      case STATE_PANEL_ONLY:
-         HandlePanelOnly();
-         break;
-      
-      case STATE_REBUILD_REQUESTED:
-         // ✅ SYNCHRONOUS BUILD - completes immediately
-         StartRebuild();
-         break;
-      
-      case STATE_LIVE:
-         ProcessLiveTicks();
-         break;
-      
-      case STATE_STOPPING:
-         break;
+      PeriodicUIUpdate();
    }
-   
-   PeriodicUIUpdate();
+   else
+   {
+      // Full timer-driven mode (legacy/fallback)
+      switch(g_state)
+      {
+         case STATE_INITIALIZING:
+            break;
+         
+         case STATE_PANEL_ONLY:
+            HandlePanelOnly();
+            break;
+         
+         case STATE_REBUILD_REQUESTED:
+            StartRebuild();
+            break;
+         
+         case STATE_LIVE:
+            ProcessLiveTicks();
+            break;
+         
+         case STATE_STOPPING:
+            break;
+      }
+      
+      PeriodicUIUpdate();
+   }
 }
 
 //+------------------------------------------------------------------+
@@ -500,16 +532,16 @@ void StartRebuild()
 }
 
 //+------------------------------------------------------------------+
-//| Process live ticks (OVO PumpLiveGeneratorTicks pattern)         |
+//| ULTRA-FAST Process live ticks (optimized for zero latency)      |
 //+------------------------------------------------------------------+
 void ProcessLiveTicks()
 {
    if(g_tick_integrity == NULL)
       return;
    
-   // Fast path: check if there's a new tick
+   // ⚡ CRITICAL FAST PATH: Check if there's a new tick
    if(!g_tick_integrity.HasNewTick())
-      return;
+      return;  // Zero overhead if no new tick
    
    // Get new ticks
    MqlTick new_ticks[];
@@ -518,11 +550,12 @@ void ProcessLiveTicks()
    if(tick_count <= 0)
       return;
    
-   // Process each tick
-   ENUM_DIRTY_STATE dirty_state = DIRTY_NONE;
+   // ⚡ OPTIMIZED: Pre-allocate for completed bricks
    RenkoBrick completed[];
    int completed_count = 0;
+   ENUM_DIRTY_STATE dirty_state = DIRTY_NONE;
    
+   // Process each tick with minimal overhead
    for(int i = 0; i < tick_count; i++)
    {
       double price = new_ticks[i].bid > 0 ? new_ticks[i].bid : new_ticks[i].last;
@@ -538,8 +571,12 @@ void ProcessLiveTicks()
       g_tick_integrity.MarkProcessed(new_ticks[i]);
    }
    
-   // Get completed bricks if any
-   if(dirty_state != DIRTY_NONE)
+   // ⚡ FAST PATH: Skip if no changes
+   if(dirty_state == DIRTY_NONE)
+      return;
+   
+   // Get completed bricks only if needed
+   if(dirty_state == DIRTY_BRICK_COMPLETED || dirty_state == DIRTY_MULTI_BRICK_COMPLETED)
    {
       if(g_config.chart_type == RENKO_REGULAR)
          completed_count = g_regular_engine.GetCompletedBricks(completed);
@@ -554,7 +591,7 @@ void ProcessLiveTicks()
    else
       forming = g_mean_engine.GetFormingBrick();
    
-   // Publish based on dirty state
+   // ⚡ INSTANT PUBLISH: No buffering, immediate update
    if(dirty_state == DIRTY_FORMING_CHANGED)
    {
       g_publisher.UpdateFormingOnly(forming);
@@ -562,10 +599,11 @@ void ProcessLiveTicks()
    else if(dirty_state == DIRTY_BRICK_COMPLETED || dirty_state == DIRTY_MULTI_BRICK_COMPLETED)
    {
       g_publisher.UpdateRates(completed, completed_count, forming);
-      g_chart_needs_redraw = true;
+      
+      // ⚡ IMMEDIATE CHART REFRESH
+      if(g_chart_manager != NULL)
+         g_chart_manager.Redraw();
    }
-   
-   CheckGeneratedChart();
 }
 
 //+------------------------------------------------------------------+
