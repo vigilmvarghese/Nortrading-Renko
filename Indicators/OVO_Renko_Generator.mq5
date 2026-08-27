@@ -921,12 +921,10 @@ void StartRebuild()
    Print("✅ Published successfully - chart cleaned and regenerated");
    
    // ⚡ CRITICAL: Force complete chart reload to clear old cached bars
-   string custom_symbol = g_publisher.GetCustomSymbolName();
+   // Note: custom_symbol, owner_gv, current_chart already declared at function start
    
    // ✅ FIXED: Only close charts that belong to THIS generator instance
-   // Check ownership before closing
-   string owner_gv = StringFormat("OVORenko_Owner_%s", custom_symbol);
-   long current_chart = ChartID();
+   // Check ownership before closing (reuse already declared owner_gv variable)
    long owner_chart_id = current_chart;  // Assume we own it
    
    if(GlobalVariableCheck(owner_gv))
