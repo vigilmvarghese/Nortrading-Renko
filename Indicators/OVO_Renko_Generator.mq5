@@ -631,52 +631,82 @@ string FindNextAvailablePeriodToken(string source_symbol)
    
    if(base_period == "") base_period = "M";  // Default to M if no prefix found
    
-   // ✅ CRITICAL: Token allocation is per-chart, not per-symbol
-   // Each source chart gets its own independent token sequence (M61, M62, M63...)
-   // Even if multiple charts have the same symbol (e.g., two US30 charts)
+   // ✅ AUTO-INCREMENT: Each chart tries M61 first, then auto-increments if taken
+   // Chart A (US30): M61 is free → Gets M61
+   // Chart B (US30): M61 is taken → Auto-increments to M62
+   // Chart C (US30): M62 is taken → Auto-increments to M63
    
    long chart_id = ChartID();
    
-   Print("🔍 Scanning for available period token...");
+   Print("🔍 Scanning for available period token (auto-increment on collision)...");
    Print("   Chart ID: ", chart_id);
    Print("   Symbol: ", source_symbol);
    Print("   Base period: ", base_period);
+   Print("   Starting from: ", base_period, "61");
    
    for(int num = 61; num <= 99; num++)
    {
       string test_period = base_period + IntegerToString(num);
+      string test_custom_symbol = source_symbol + "." + test_period;
       
-      // ✅ FIXED: Include ChartID so each source chart has independent token pool
-      // This allows: US30 Chart A: M61,M62,M63... and US30 Chart B: M61,M62,M63...
+      // ✅ Check 1: Token allocation per chart
       string gv_name = StringFormat("OVORenko_Token_%I64d_%s_%s", chart_id, source_symbol, test_period);
       
-      // ✅ ATOMIC CHECK-AND-CLAIM: Check and set in one operation
-      // If GlobalVariableCheck returns false, immediately claim it
+      // ✅ Check 2: Custom symbol ownership (the key check for collision)
+      string owner_gv = StringFormat("OVORenko_Owner_%s", test_custom_symbol);
+      
+      // Check if token is already allocated for THIS chart
       if(!GlobalVariableCheck(gv_name))
       {
-         // Attempt to claim this token atomically
-         if(GlobalVariableSet(gv_name, GetTickCount()))  // Use tick count as unique instance ID
+         // Token not yet allocated to this chart
+         // Now check if the custom symbol is taken by ANOTHER chart
+         if(GlobalVariableCheck(owner_gv))
          {
-            Print("✅ Auto-assigned period token: ", test_period, " (claimed atomically)");
-            Print("   Global Variable: ", gv_name);
+            long owner_chart = (long)GlobalVariableGet(owner_gv);
+            
+            // Check if owner chart still exists
+            if(owner_chart != chart_id && ChartSymbol(owner_chart) != "")
+            {
+               // Another chart owns this custom symbol - skip and try next
+               Print("   ⚠️ ", test_period, " → ", test_custom_symbol, " owned by Chart ", owner_chart, " - trying next");
+               continue;
+            }
+            else
+            {
+               // Owner chart no longer exists - we can take over
+               Print("   ✓ ", test_period, " → Previous owner gone, can reuse");
+            }
+         }
+         else
+         {
+            // Custom symbol is not owned by anyone - available!
+            Print("   ✓ ", test_period, " → ", test_custom_symbol, " is FREE");
+         }
+         
+         // Attempt to claim this token atomically
+         if(GlobalVariableSet(gv_name, GetTickCount()))
+         {
+            Print("✅ AUTO-ASSIGNED: ", test_period, " (", test_custom_symbol, ")");
+            Print("   Token claimed for Chart ", chart_id);
             return test_period;
          }
          else
          {
-            Print("⚠️ Failed to claim token ", test_period, ", error: ", GetLastError());
-            continue;  // Another instance claimed it first
+            Print("   ⚠️ Failed to claim ", test_period, ", error: ", GetLastError(), " - trying next");
+            continue;
          }
       }
       else
       {
-         Print("⚠️ Period token ", test_period, " in use (global variable exists)");
-         continue;  // Token in use
+         // Token already allocated to this chart (recompile scenario)
+         Print("   ⚠️ ", test_period, " already allocated to this chart");
+         continue;
       }
    }
    
-   // Fallback: use the input token with timestamp to make it unique
+   // Fallback: All M61-M99 taken
    string fallback = base_period + IntegerToString((int)(TimeCurrent() % 100));
-   Print("⚠️ All period tokens M61-M99 in use, using fallback: ", fallback);
+   Print("⚠️ All tokens M61-M99 in use, using fallback: ", fallback);
    return fallback;
 }
 
@@ -805,47 +835,17 @@ void StartRebuild()
 {
    Print("=== Starting SYNCHRONOUS Rebuild ===");
    
-   // ✅ CRITICAL FIX: Check if this custom symbol is already owned by another chart
+   // ✅ Token allocation already handled collision detection
+   // FindNextAvailablePeriodToken() checked if custom symbol is in use
+   // and auto-incremented to next available token (M61 → M62 → M63)
+   
    string expected_symbol = _Symbol + "." + g_config.period_token;
    string ownership_gv = StringFormat("OVORenko_Owner_%s", expected_symbol);
    long this_chart = ChartID();
    
-   if(GlobalVariableCheck(ownership_gv))
-   {
-      long owner_chart_id = (long)GlobalVariableGet(ownership_gv);
-      
-      // If owned by a different chart, check if that chart still exists
-      if(owner_chart_id != this_chart && owner_chart_id > 0)
-      {
-         string owner_symbol = ChartSymbol(owner_chart_id);
-         
-         if(owner_symbol != "" && owner_symbol != NULL)
-         {
-            // Owner chart still exists - this is a collision!
-            Print("❌ ERROR: Custom symbol ", expected_symbol, " is already in use by Chart ", owner_chart_id);
-            Print("   Current chart: ", this_chart);
-            Print("   Owner chart: ", owner_chart_id, " (", owner_symbol, ")");
-            
-            Alert("Period token ", g_config.period_token, " collision!\nAnother ", _Symbol, 
-                  " chart is already using this token.\nTry a different token or close the other chart first.");
-            
-            g_state = STATE_PANEL_ONLY;
-            if(g_panel != NULL)
-               g_panel.SetStatusText("Token Collision!");
-            
-            return;
-         }
-         else
-         {
-            // Owner chart was closed - we can take over
-            Print("⚠️ Previous owner chart ", owner_chart_id, " no longer exists - taking over ", expected_symbol);
-         }
-      }
-   }
-   
    // Claim ownership of this custom symbol
    GlobalVariableSet(ownership_gv, (double)this_chart);
-   Print("✅ Claimed ownership of ", expected_symbol, " for chart ", this_chart);
+   Print("✅ Claimed ownership: ", expected_symbol, " → Chart ", this_chart);
    
    g_rebuild_requested = false;
    
